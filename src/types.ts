@@ -6,8 +6,10 @@ export interface ChatMessage {
   role: Role;
   content: string;
   name?: string;          // function/tool name for tool results
-  toolCallId?: string;    // correlates a tool result with its call
+  toolCallId?: string;    // internal correlation ID for tool results
+  providerCallId?: string; // provider-issued function call ID (Google functionResponse.id)
   toolCalls?: ToolCall[]; // assistant message requesting tools
+  providerParts?: unknown[]; // raw provider parts; needed to preserve Gemini thought signatures
   timestamp?: string;
 }
 
@@ -15,6 +17,8 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  providerCallId?: string;
+  thoughtSignature?: string;
 }
 
 export interface ToolParamSchema {
@@ -97,6 +101,7 @@ export interface ProviderChatResult {
   content: string;
   toolCalls: ToolCall[];
   finishReason?: string;
+  providerParts?: unknown[];
 }
 
 // Owner-specified default models (from project spec).
@@ -105,7 +110,7 @@ export const DEFAULT_MODELS: CustomModel[] = [
   { id: 'gemma-4-26b-a4b-it',    label: 'Gemma 4 26B A4B IT',    provider: 'google-ai-studio' },
   { id: 'gemini-3.5-flash',      label: 'Gemini 3.5 Flash',      provider: 'google-ai-studio' },
   { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', provider: 'google-ai-studio' },
-  { id: 'gemini-3.1-flash',      label: 'Gemini 3.1 Flash',      provider: 'google-ai-studio' },
+  { id: 'gemini-3.8-flash',      label: 'Gemini 3.8 Flash',      provider: 'google-ai-studio' },
   { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', provider: 'google-ai-studio' },
 ];
 

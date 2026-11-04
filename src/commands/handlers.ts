@@ -66,6 +66,14 @@ export async function handleThinking(ctx: CommandContext): Promise<HandlerResult
     ctx.config.thinkingLevel = levels[idx];
     ctx.saveConfig();
     ctx.repl.print(`Thinking set to ${levels[idx]}.`);
+    if (levels[idx] === 'off') {
+      const model = ctx.config.model.toLowerCase();
+      const canDisable = ctx.config.activeProvider === 'google-ai-studio' &&
+        /^gemini-2\.5-(?:flash|flash-lite)/i.test(model);
+      if (!canDisable) {
+        ctx.repl.print('Note: the selected model/provider does not support fully disabling thinking; the provider default may remain active.');
+      }
+    }
   }
 }
 
@@ -125,7 +133,7 @@ export async function handleMemory(ctx: CommandContext): Promise<HandlerResult |
 
 export async function handleApiKey(ctx: CommandContext): Promise<HandlerResult | void> {
   const key = (
-    await ctx.repl.question(`Enter API key for ${ctx.config.activeProvider}: `)
+    await ctx.repl.questionSecret(`Enter API key for ${ctx.config.activeProvider}: `)
   ).trim();
   if (!key) {
     ctx.repl.print('Cancelled.');
@@ -145,8 +153,6 @@ export async function handlePermissions(ctx: CommandContext): Promise<HandlerRes
     'webAccess',
     'searchAccess',
     'shellExec',
-    'fileRead',
-    'fileWrite',
   ];
   for (;;) {
     ctx.repl.print(chalk.bold('Permissions:'));
@@ -188,8 +194,23 @@ export async function handleProvider(ctx: CommandContext): Promise<HandlerResult
     const baseUrl = (
       await ctx.repl.question('Base URL (e.g. https://api.openai.com/v1): ')
     ).trim();
-    const apiKey = (await ctx.repl.question('API Key: ')).trim();
-    ctx.config.openaiCompatible = { baseUrl, apiKey };
+    let parsedBaseUrl: URL;
+    try {
+      parsedBaseUrl = new URL(baseUrl);
+    } catch {
+      ctx.repl.print('Invalid base URL. Enter an absolute HTTP or HTTPS URL.');
+      return;
+    }
+    if ((parsedBaseUrl.protocol !== 'https:' && parsedBaseUrl.protocol !== 'http:') || parsedBaseUrl.username || parsedBaseUrl.password) {
+      ctx.repl.print('Invalid base URL. Only HTTP/HTTPS URLs without embedded credentials are supported.');
+      return;
+    }
+    const apiKey = (await ctx.repl.questionSecret('API Key: ')).trim();
+    if (!apiKey) {
+      ctx.repl.print('Provider switch cancelled because the API key was empty.');
+      return;
+    }
+    ctx.config.openaiCompatible = { baseUrl: baseUrl.replace(/\/$/, ''), apiKey };
     ctx.config.activeProvider = 'openai-compatible';
     ctx.saveConfig();
     ctx.repl.print('Provider set to OpenAI-compatible.');

@@ -12,18 +12,41 @@ import {
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
+function buildThinkingConfig(model: string, level: ProviderChatOptions['thinkingLevel']): Record<string, unknown> | undefined {
+  if (!level) return undefined;
+  if (/^gemma-4-/i.test(model)) {
+    // Gemma 4 exposes a binary thinking switch: MINIMAL is off, HIGH is on.
+    return { thinkingLevel: level === 'off' ? 'MINIMAL' : 'HIGH' };
+  }
+  if (/^gemini-3(?:\.|-)/i.test(model)) {
+    if (level === 'off') return undefined;
+    const thinkingLevel = level === 'max' ? 'HIGH' : level.toUpperCase();
+    return { thinkingLevel };
+  }
+  if (/^gemini-2\.5-/i.test(model)) {
+    if (level === 'off') {
+      // Gemini 2.5 Flash families accept 0; Gemini 2.5 Pro does not support disabling thinking.
+      return /^gemini-2\.5-(?:flash|flash-lite)/i.test(model) ? { thinkingBudget: 0 } : undefined;
+    }
+    const thinkingBudget = level === 'max' ? -1 : THINKING_BUDGET[level];
+    return { thinkingBudget };
+  }
+  // Do not send Gemini-specific thinking parameters to other providers/models.
+  return undefined;
+}
+
 export class GoogleAIProvider implements BaseProvider {
   constructor(private apiKey: string) {}
 
   async chat(opts: ProviderChatOptions): Promise<ProviderChatResult> {
-    const wantsThinking = !!opts.thinkingLevel && opts.thinkingLevel !== 'off';
+    const thinkingConfig = buildThinkingConfig(opts.model, opts.thinkingLevel);
     try {
-      return await this.request(opts, wantsThinking);
+      return await this.request(opts, thinkingConfig);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      // If the model/config rejects thinkingConfig, retry without it.
-      if (wantsThinking && /thinking|INVALID_ARGUMENT/i.test(msg)) {
-        return this.request(opts, false);
+      // Retry only when the provider explicitly rejects a thinking parameter.
+      if (thinkingConfig && /thinkingConfig|thinkingBudget|thinkingLevel/i.test(msg)) {
+        return this.request(opts, undefined);
       }
       throw new Error(msg);
     }
@@ -31,17 +54,14 @@ export class GoogleAIProvider implements BaseProvider {
 
   private async request(
     opts: ProviderChatOptions,
-    includeThinking: boolean,
+    thinkingConfig?: Record<string, unknown>,
   ): Promise<ProviderChatResult> {
-    const generationConfig: Record<string, unknown> = {
-      temperature: opts.temperature ?? 0.7,
-    };
-    if (opts.maxOutputTokens) generationConfig.maxOutputTokens = opts.maxOutputTokens;
-    if (includeThinking && opts.thinkingLevel && opts.thinkingLevel !== 'off') {
-      generationConfig.thinkingConfig = {
-        thinkingBudget: THINKING_BUDGET[opts.thinkingLevel],
-      };
-    }
+    const isGemini3 = /^gemini-3(?:\.|-)/i.test(opts.model);
+    const generationConfig: Record<string, unknown> = {};
+    // Gemini 3 guidance recommends omitting sampling parameters and using provider defaults.
+    if (!isGemini3) generationConfig.temperature = opts.temperature ?? 0.7;
+    if (opts.maxOutputTokens !== undefined) generationConfig.maxOutputTokens = opts.maxOutputTokens;
+    if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig;
 
     const body: Record<string, unknown> = {
       contents: this.buildContents(opts.messages),
@@ -53,10 +73,10 @@ export class GoogleAIProvider implements BaseProvider {
     if (opts.tools && opts.tools.length) {
       body.tools = [
         {
-          functionDeclarations: opts.tools.map((td) => ({
-            name: td.name,
-            description: td.description,
-            parameters: td.parameters,
+          functionDeclarations: opts.tools.map((definition) => ({
+            name: definition.name,
+            description: definition.description,
+            parameters: definition.parameters,
           })),
         },
       ];
@@ -70,55 +90,94 @@ export class GoogleAIProvider implements BaseProvider {
         'User-Agent': USER_AGENT,
       },
       timeout: 120000,
-      validateStatus: (s) => s < 500,
+      validateStatus: (status) => status < 500,
     });
 
     if (res.status >= 400) {
-      const m = res.data?.error?.message || `HTTP ${res.status}`;
-      throw new Error(m);
+      const message = res.data?.error?.message || `Google AI API returned HTTP ${res.status}`;
+      throw new Error(message);
     }
 
-    const cand = res.data?.candidates?.[0];
-    const parts = cand?.content?.parts || [];
+    const candidate = res.data?.candidates?.[0];
+    if (!candidate) {
+      const blockReason = res.data?.promptFeedback?.blockReason;
+      throw new Error(blockReason
+        ? `Google AI request was blocked: ${blockReason}`
+        : 'Google AI API returned no candidate response.');
+    }
+
+    const parts = candidate.content?.parts || [];
     let content = '';
     const toolCalls: ToolCall[] = [];
-    for (const p of parts) {
-      if (typeof p.text === 'string') content += p.text;
-      if (p.functionCall) {
+    for (const part of parts) {
+      if (typeof part.text === 'string') content += part.text;
+      if (part.functionCall && typeof part.functionCall.name === 'string') {
         toolCalls.push({
           id: uuidv4(),
-          name: p.functionCall.name,
-          arguments: p.functionCall.args || {},
+          name: part.functionCall.name,
+          arguments: part.functionCall.args && typeof part.functionCall.args === 'object' && !Array.isArray(part.functionCall.args)
+            ? part.functionCall.args as Record<string, unknown>
+            : {},
+          providerCallId: typeof part.functionCall.id === 'string' ? part.functionCall.id : undefined,
+          thoughtSignature: typeof part.thoughtSignature === 'string' ? part.thoughtSignature : undefined,
         });
       }
     }
-    return { content, toolCalls, finishReason: cand?.finishReason };
+    return { content, toolCalls, finishReason: candidate.finishReason, providerParts: parts };
   }
 
   private buildContents(messages: ChatMessage[]): unknown[] {
     const contents: unknown[] = [];
-    for (const m of messages) {
-      if (m.role === 'system') continue; // handled via systemInstruction
-      if (m.role === 'user') {
-        contents.push({ role: 'user', parts: [{ text: m.content }] });
-      } else if (m.role === 'assistant') {
+    const pendingFunctionResponses: unknown[] = [];
+    const flushFunctionResponses = (): void => {
+      if (pendingFunctionResponses.length) {
+        // Gemini expects parallel function responses together in one user Content,
+        // preserving the order of the corresponding functionCall parts.
+        contents.push({ role: 'user', parts: [...pendingFunctionResponses] });
+        pendingFunctionResponses.length = 0;
+      }
+    };
+
+    for (const message of messages) {
+      if (message.role === 'system') continue; // system prompt is sent as systemInstruction
+      if (message.role === 'tool') {
+        pendingFunctionResponses.push({
+          functionResponse: {
+            name: message.name || 'tool',
+            response: { result: message.content },
+            ...(message.providerCallId ? { id: message.providerCallId } : {}),
+          },
+        });
+        continue;
+      }
+
+      flushFunctionResponses();
+      if (message.role === 'user') {
+        contents.push({ role: 'user', parts: [{ text: message.content }] });
+      } else if (message.role === 'assistant') {
+        if (message.providerParts && message.providerParts.length) {
+          // Return raw model parts verbatim: Gemini thought signatures are position-sensitive.
+          contents.push({ role: 'model', parts: message.providerParts });
+          continue;
+        }
         const parts: unknown[] = [];
-        if (m.content) parts.push({ text: m.content });
-        if (m.toolCalls) {
-          for (const tc of m.toolCalls) {
-            parts.push({ functionCall: { name: tc.name, args: tc.arguments } });
+        if (message.content) parts.push({ text: message.content });
+        if (message.toolCalls) {
+          for (const toolCall of message.toolCalls) {
+            parts.push({
+              functionCall: {
+                name: toolCall.name,
+                args: toolCall.arguments,
+                ...(toolCall.providerCallId ? { id: toolCall.providerCallId } : {}),
+              },
+              ...(toolCall.thoughtSignature ? { thoughtSignature: toolCall.thoughtSignature } : {}),
+            });
           }
         }
         if (parts.length) contents.push({ role: 'model', parts });
-      } else if (m.role === 'tool') {
-        contents.push({
-          role: 'user',
-          parts: [
-            { functionResponse: { name: m.name || 'tool', response: { result: m.content } } },
-          ],
-        });
       }
     }
+    flushFunctionResponses();
     return contents;
   }
 }

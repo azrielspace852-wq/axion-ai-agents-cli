@@ -15,6 +15,7 @@ async function googleSearch(q: string, max: number): Promise<SearchResult[]> {
     timeout: 20000,
     validateStatus: (s) => s < 500,
   });
+  if (res.status >= 400) throw new Error(`Google Search returned HTTP ${res.status}`);
   const $ = cheerio.load(res.data);
   const results: SearchResult[] = [];
   $('div.g, div[data-hveid]').each((_, el) => {
@@ -39,6 +40,7 @@ async function ddgSearch(q: string, max: number): Promise<SearchResult[]> {
     timeout: 20000,
     validateStatus: (s) => s < 500,
   });
+  if (res.status >= 400) throw new Error(`DuckDuckGo Search returned HTTP ${res.status}`);
   const $ = cheerio.load(res.data);
   const results: SearchResult[] = [];
   $('.result').each((_, el) => {
@@ -83,7 +85,10 @@ export const GoogleSearchTool: AgentTool = {
     }
     const q = String(args.query || '').trim();
     if (!q) return { success: false, output: 'Empty query.' };
-    const max = Number(args.maxResults) || 5;
+    const requestedMax = Number(args.maxResults);
+    const max = Number.isFinite(requestedMax) && requestedMax > 0
+      ? Math.min(10, Math.floor(requestedMax))
+      : 5;
     try {
       let results: SearchResult[] = [];
       try {

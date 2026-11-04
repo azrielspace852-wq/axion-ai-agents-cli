@@ -12,31 +12,41 @@ export class OpenAICompatProvider implements BaseProvider {
   constructor(private baseUrl: string, private apiKey: string) {}
 
   async chat(opts: ProviderChatOptions): Promise<ProviderChatResult> {
-    const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
+    let base: URL;
+    try {
+      base = new URL(this.baseUrl);
+    } catch {
+      throw new Error('Invalid OpenAI-compatible base URL. Use an absolute HTTP or HTTPS URL.');
+    }
+    if ((base.protocol !== 'https:' && base.protocol !== 'http:') || base.username || base.password) {
+      throw new Error('OpenAI-compatible base URL must use HTTP/HTTPS and must not contain credentials.');
+    }
+    const url = `${base.toString().replace(/\/$/, '')}/chat/completions`;
 
     const messages: Record<string, unknown>[] = [];
     if (opts.systemPrompt) messages.push({ role: 'system', content: opts.systemPrompt });
 
-    for (const m of opts.messages) {
-      if (m.role === 'system') continue;
-      if (m.role === 'user') {
-        messages.push({ role: 'user', content: m.content });
-      } else if (m.role === 'assistant') {
-        if (m.toolCalls && m.toolCalls.length) {
+    for (const message of opts.messages) {
+      if (message.role === 'system') continue;
+      if (message.role === 'user') {
+        messages.push({ role: 'user', content: message.content });
+      } else if (message.role === 'assistant') {
+        if (message.toolCalls && message.toolCalls.length) {
           messages.push({
             role: 'assistant',
-            content: m.content || null,
-            tool_calls: m.toolCalls.map((tc) => ({
-              id: tc.id,
+            content: message.content || null,
+            tool_calls: message.toolCalls.map((toolCall) => ({
+              id: toolCall.id,
               type: 'function',
-              function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+              function: { name: toolCall.name, arguments: JSON.stringify(toolCall.arguments) },
             })),
           });
         } else {
-          messages.push({ role: 'assistant', content: m.content });
+          messages.push({ role: 'assistant', content: message.content });
         }
-      } else if (m.role === 'tool') {
-        messages.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
+      } else if (message.role === 'tool') {
+        if (!message.toolCallId) throw new Error('Tool result is missing its tool_call_id.');
+        messages.push({ role: 'tool', tool_call_id: message.toolCallId, content: message.content });
       }
     }
 
@@ -45,11 +55,11 @@ export class OpenAICompatProvider implements BaseProvider {
       messages,
       temperature: opts.temperature ?? 0.7,
     };
-    if (opts.maxOutputTokens) body.max_tokens = opts.maxOutputTokens;
+    if (opts.maxOutputTokens !== undefined) body.max_tokens = opts.maxOutputTokens;
     if (opts.tools && opts.tools.length) {
-      body.tools = opts.tools.map((td) => ({
+      body.tools = opts.tools.map((definition) => ({
         type: 'function',
-        function: { name: td.name, description: td.description, parameters: td.parameters },
+        function: { name: definition.name, description: definition.description, parameters: definition.parameters },
       }));
     }
 
@@ -59,31 +69,36 @@ export class OpenAICompatProvider implements BaseProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       timeout: 120000,
-      validateStatus: (s) => s < 500,
+      validateStatus: (status) => status < 500,
     });
 
     if (res.status >= 400) {
-      throw new Error(res.data?.error?.message || `HTTP ${res.status}`);
+      throw new Error(res.data?.error?.message || `OpenAI-compatible provider returned HTTP ${res.status}`);
     }
 
-    const msg = res.data?.choices?.[0]?.message;
-    const content: string = msg?.content || '';
+    const choice = res.data?.choices?.[0];
+    if (!choice?.message) throw new Error('OpenAI-compatible provider returned no assistant message.');
+    const responseMessage = choice.message;
+    const content = typeof responseMessage.content === 'string' ? responseMessage.content : '';
     const toolCalls: ToolCall[] = [];
-    if (Array.isArray(msg?.tool_calls)) {
-      for (const tc of msg.tool_calls) {
-        let args: Record<string, unknown> = {};
+    if (Array.isArray(responseMessage.tool_calls)) {
+      for (const call of responseMessage.tool_calls) {
+        const name = call.function?.name;
+        if (typeof name !== 'string' || !name) continue;
+        let args: Record<string, unknown>;
         try {
-          args = JSON.parse(tc.function?.arguments || '{}');
-        } catch {
-          args = {};
+          const parsed: unknown = JSON.parse(call.function?.arguments || '{}');
+          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            throw new Error('Tool arguments must be a JSON object.');
+          }
+          args = parsed as Record<string, unknown>;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(`Invalid arguments returned for tool ${name}: ${message}`);
         }
-        toolCalls.push({
-          id: tc.id || uuidv4(),
-          name: tc.function?.name || '',
-          arguments: args,
-        });
+        toolCalls.push({ id: call.id || uuidv4(), name, arguments: args });
       }
     }
-    return { content, toolCalls, finishReason: res.data?.choices?.[0]?.finish_reason };
+    return { content, toolCalls, finishReason: choice.finish_reason };
   }
 }

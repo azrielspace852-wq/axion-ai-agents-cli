@@ -28,7 +28,10 @@ export class ToolRegistry {
     const tool = this.tools.get(name);
     if (!tool) return { success: false, output: `Unknown tool: ${name}` };
     try {
-      return await tool.execute(args, ctx);
+      const safeArgs = typeof args === 'object' && args !== null && !Array.isArray(args)
+        ? args
+        : {};
+      return await tool.execute(safeArgs, ctx);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       return { success: false, output: `Tool error: ${msg}` };

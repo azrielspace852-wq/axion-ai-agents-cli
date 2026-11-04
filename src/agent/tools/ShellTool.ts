@@ -1,4 +1,6 @@
 import { exec } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { AgentTool, ToolResult } from '../../types';
 
 export const ShellTool: AgentTool = {
@@ -23,9 +25,16 @@ export const ShellTool: AgentTool = {
           'Permission denied: shellExec is disabled. Enable it via /permissions if you trust this operation.',
       };
     }
-    const command = String(args.command || '');
+    const command = String(args.command || '').trim();
     if (!command) return { success: false, output: 'Empty command.' };
-    const cwd = String(args.cwd || ctx.cwd);
+    const cwd = path.resolve(String(args.cwd || ctx.cwd));
+    try {
+      if (!fs.statSync(cwd).isDirectory()) {
+        return { success: false, output: `Working directory is not a directory: ${cwd}` };
+      }
+    } catch {
+      return { success: false, output: `Working directory does not exist or is inaccessible: ${cwd}` };
+    }
 
     return new Promise((resolve) => {
       exec(command, { cwd, timeout: 30000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {

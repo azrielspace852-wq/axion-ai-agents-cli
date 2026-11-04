@@ -6,6 +6,7 @@ import type { Agent } from '../agent/Agent';
 export interface ReplLike {
   print(msg: string): void;
   question(q: string): Promise<string>;
+  questionSecret(q: string): Promise<string>;
   clearScreen(): void;
   exit(code?: number): void;
   resetContext(): void;

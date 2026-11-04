@@ -17,6 +17,7 @@ export class REPL implements ReplLike {
   private conversation!: ConversationFile;
   private history: ChatMessage[] = [];
   private running = true;
+  private suppressInputEcho = false;
 
   constructor(
     private cfgMgr: ConfigManager,
@@ -34,6 +35,14 @@ export class REPL implements ReplLike {
       output: process.stdout,
       terminal: true,
     });
+    // Readline normally echoes typed input. Suppress that echo only while a secret is requested.
+    const internalRl = this.rl as unknown as { _writeToOutput?: (text: string) => void };
+    if (typeof internalRl._writeToOutput === 'function') {
+      const originalWriter = internalRl._writeToOutput.bind(this.rl);
+      internalRl._writeToOutput = (text: string): void => {
+        if (!this.suppressInputEcho) originalWriter(text);
+      };
+    }
     this.rl.on('SIGINT', () => {
       this.print('');
       this.exit(0);
@@ -94,14 +103,18 @@ export class REPL implements ReplLike {
     const systemPrompt = this.agent.buildSystemPrompt(memoryText);
     this.print(chalk.dim(t('agent.thinking')));
 
+    const generatedStart = this.history.length;
     try {
       const reply = await this.agent.chat(this.history, systemPrompt);
-      this.conversations.appendMessage(this.conversation, 'assistant', reply);
-      this.history.push({ role: 'assistant', content: reply });
       this.print('\n' + chalk.green('AXION ❯ ') + reply + '\n');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       this.print(chalk.red('Error: ') + msg);
+    } finally {
+      // Persist the complete provider exchange, including tool calls/results and opaque thought signatures.
+      for (const message of this.history.slice(generatedStart)) {
+        this.conversations.appendMessage(this.conversation, message.role, message.content, message);
+      }
     }
   }
 
@@ -112,6 +125,18 @@ export class REPL implements ReplLike {
 
   question(q: string): Promise<string> {
     return new Promise((resolve) => this.rl.question(q, (ans) => resolve(ans)));
+  }
+
+  questionSecret(q: string): Promise<string> {
+    process.stdout.write(q);
+    this.suppressInputEcho = true;
+    return new Promise((resolve) => {
+      this.rl.question('', (answer) => {
+        this.suppressInputEcho = false;
+        process.stdout.write('\n');
+        resolve(answer);
+      });
+    });
   }
 
   clearScreen(): void {
@@ -139,9 +164,15 @@ export class REPL implements ReplLike {
     const doc = this.conversations.load(id);
     if (!doc) return false;
     this.conversation = doc;
-    this.history = doc.messages
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({ role: m.role, content: m.content }));
+    this.history = doc.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      ...(message.name ? { name: message.name } : {}),
+      ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+      ...(message.providerCallId ? { providerCallId: message.providerCallId } : {}),
+      ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
+      ...(message.providerParts ? { providerParts: message.providerParts } : {}),
+    }));
     return true;
   }
 

@@ -66,6 +66,9 @@ export class Agent {
     };
 
     let messages: ChatMessage[] = [...history];
+    const syncHistory = (): void => {
+      history.splice(0, history.length, ...messages);
+    };
     const MAX_ITER = 6;
 
     for (let i = 0; i < MAX_ITER; i++) {
@@ -78,7 +81,13 @@ export class Agent {
       });
 
       if (res.toolCalls && res.toolCalls.length) {
-        messages.push({ role: 'assistant', content: res.content || '', toolCalls: res.toolCalls });
+        messages.push({
+          role: 'assistant',
+          content: res.content || '',
+          toolCalls: res.toolCalls,
+          providerParts: res.providerParts,
+        });
+        syncHistory();
         for (const tc of res.toolCalls) {
           this.notice(`🔧 tool: ${tc.name}`);
           const result = await this.tools.execute(tc.name, tc.arguments, ctx);
@@ -86,14 +95,22 @@ export class Agent {
             role: 'tool',
             name: tc.name,
             toolCallId: tc.id,
+            providerCallId: tc.providerCallId,
             content: result.success ? result.output : `[tool error] ${result.output}`,
           });
+          syncHistory();
         }
         continue;
       }
-      return res.content || '(empty response)';
+      const answer = res.content || '(empty response)';
+      messages.push({ role: 'assistant', content: answer, providerParts: res.providerParts });
+      syncHistory();
+      return answer;
     }
-    return '(stopped: tool loop limit reached)';
+    const stopped = '(stopped: tool loop limit reached)';
+    messages.push({ role: 'assistant', content: stopped });
+    syncHistory();
+    return stopped;
   }
 
   // Summarize a raw note into a concise fact before storing in memory.
