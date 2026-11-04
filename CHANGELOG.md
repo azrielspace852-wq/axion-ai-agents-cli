@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2
+
+- Fixed the Termux TypeScript build failure (`TS7016`) caused by importing `uuid@9.0.1`, which does not provide a TypeScript declaration entry for the compiler to resolve.
+- Replaced UUID generation in both model providers and both storage modules with Node.js' built-in `crypto.randomUUID()` API. This produces UUID v4 identifiers and removes the external `uuid` dependency entirely.
+- Added regression assertions that conversation and memory IDs retain the UUID v4 format.
+- Bumped the CLI version to `1.0.2`.
+
 ## 1.0.1
 
 - Reworked the installer to build and run regression tests in a staging directory, validate the CLI, refuse dangerous targets, and preserve the previous installation as a backup.

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { BaseProvider } from './BaseProvider';
 import {
   ProviderChatOptions,
@@ -113,7 +113,7 @@ export class GoogleAIProvider implements BaseProvider {
       if (typeof part.text === 'string') content += part.text;
       if (part.functionCall && typeof part.functionCall.name === 'string') {
         toolCalls.push({
-          id: uuidv4(),
+          id: randomUUID(),
           name: part.functionCall.name,
           arguments: part.functionCall.args && typeof part.functionCall.args === 'object' && !Array.isArray(part.functionCall.args)
             ? part.functionCall.args as Record<string, unknown>

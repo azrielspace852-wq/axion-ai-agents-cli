@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { BaseProvider } from './BaseProvider';
 import {
   ProviderChatOptions,
@@ -96,7 +96,7 @@ export class OpenAICompatProvider implements BaseProvider {
           const message = error instanceof Error ? error.message : String(error);
           throw new Error(`Invalid arguments returned for tool ${name}: ${message}`);
         }
-        toolCalls.push({ id: call.id || uuidv4(), name, arguments: args });
+        toolCalls.push({ id: call.id || randomUUID(), name, arguments: args });
       }
     }
     return { content, toolCalls, finishReason: choice.finish_reason };

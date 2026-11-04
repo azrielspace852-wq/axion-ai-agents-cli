@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { MEMORY_DIR } from '../config/paths';
 import { ensurePrivateDir, writeJsonAtomically } from '../utils/jsonFile';
 
@@ -76,7 +76,7 @@ export class MemoryStore {
     if (!topic) throw new Error('Memory topic cannot be empty.');
     const found = this.list().find((memory) => memory.about.toLowerCase() === topic.toLowerCase());
     if (found) return found;
-    const doc: MemoryFile = { 'memory-id': uuidv4(), about: topic, memories: [] };
+    const doc: MemoryFile = { 'memory-id': randomUUID(), about: topic, memories: [] };
     this.write(doc);
     return doc;
   }

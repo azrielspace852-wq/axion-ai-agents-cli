@@ -43,6 +43,7 @@ test('malformed configuration is preserved and defaults are restored', () => {
 test('conversation storage creates, persists, lists, backs up, and rejects unsafe IDs', () => {
   const store = new ConversationStore();
   const conversation = store.create('Regression test');
+  assert.match(conversation['conversation-id'], /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   store.appendMessage(conversation, 'user', 'Hello');
   store.appendMessage(conversation, 'assistant', 'World');
 
@@ -96,6 +97,7 @@ test('Gemini provider returns thought signatures and groups parallel function re
     const provider = new GoogleAIProvider('test-key');
     const first = await provider.chat({ model: 'gemini-3.8-flash', messages: [{ role: 'user', content: 'Search and inspect' }] });
     assert.deepEqual(first.providerParts, responseParts);
+    assert.match(first.toolCalls[0].id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     assert.equal(first.toolCalls[0].providerCallId, 'call-1');
     assert.equal(first.toolCalls[0].thoughtSignature, 'signature-1');
 
@@ -153,10 +155,39 @@ test('Gemini provider returns thought signatures and groups parallel function re
   }
 });
 
+test('OpenAI-compatible provider generates UUID v4 IDs for tool calls without provider IDs', async () => {
+  const axios = require('axios');
+  const originalPost = axios.post;
+  const { OpenAICompatProvider } = require('../dist/agent/providers/OpenAICompatProvider');
+  axios.post = async () => ({
+    status: 200,
+    data: {
+      choices: [{
+        message: {
+          content: '',
+          tool_calls: [{ type: 'function', function: { name: 'lookup', arguments: '{"query":"AXION"}' } }],
+        },
+      }],
+    },
+  });
+  try {
+    const provider = new OpenAICompatProvider('https://api.example.test/v1', 'test-key');
+    const result = await provider.chat({
+      model: 'test-model',
+      messages: [{ role: 'user', content: 'look this up' }],
+    });
+    assert.equal(result.toolCalls.length, 1);
+    assert.match(result.toolCalls[0].id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  } finally {
+    axios.post = originalPost;
+  }
+});
+
 test('memory storage creates topics, appends entries, renumbers deletes, and rejects unsafe IDs', () => {
   const store = new MemoryStore();
   store.add('Project', 'First fact');
   const doc = store.add('project', 'Second fact');
+  assert.match(doc['memory-id'], /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.equal(doc.memories.length, 2);
   const updated = store.deleteEntry(doc['memory-id'], 1);
   assert.equal(updated.memories.length, 1);
@@ -215,7 +246,7 @@ test('CLI version command starts without entering the interactive REPL', () => {
     env: { ...process.env },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^1\.0\.1\s*$/);
+  assert.match(result.stdout, /^1\.0\.2\s*$/);
 });
 
 test('installer validates in staging and preserves the prior app if a build fails', () => {
@@ -232,7 +263,7 @@ test('installer validates in staging and preserves the prior app if a build fail
 
   const fakeNode = `#!/bin/sh
 if [ "$1" = "-p" ]; then printf '22.16.0\\n'; exit 0; fi
-if [ "$2" = "--version" ]; then printf '1.0.1\\n'; exit 0; fi
+if [ "$2" = "--version" ]; then printf '1.0.2\\n'; exit 0; fi
 exec "$REAL_NODE" "$@"
 `;
   const fakeNpm = `#!/bin/sh
@@ -243,7 +274,7 @@ case "$1" in
     if [ "$1" = "run" ] && [ "$2" != "build" ]; then exit 1; fi
     if [ "${'${FAKE_NPM_FAIL_BUILD:-0}'}" = "1" ]; then echo 'simulated build/test failure' >&2; exit 1; fi
     mkdir -p dist
-    printf '#!/usr/bin/env node\nconsole.log("1.0.1")\n' > dist/index.js
+    printf '#!/usr/bin/env node\nconsole.log("1.0.2")\n' > dist/index.js
     chmod +x dist/index.js
     exit 0 ;;
   *) exit 1 ;;

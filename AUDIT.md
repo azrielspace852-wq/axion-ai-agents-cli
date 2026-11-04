@@ -2,7 +2,7 @@
 
 ## Scope
 
-The supplied project archive was reviewed across its installer, package metadata, TypeScript source, command handlers, providers, tools, configuration, persistence, and documentation. The project was updated to version `1.0.1` in this working copy.
+The supplied project archive was reviewed across its installer, package metadata, TypeScript source, command handlers, providers, tools, configuration, persistence, and documentation. The project was updated to version `1.0.2` in this working copy.
 
 ## Issues identified and addressed
 
@@ -23,12 +23,12 @@ The supplied project archive was reviewed across its installer, package metadata
 
 | Check | Result |
 |---|---|
-| TypeScript compile (`tsc -p tsconfig.json`) | Passed in the offline validation harness |
-| Automated tests (`npm test`) | 10 passed, 0 failed in the offline validation harness |
+| TypeScript compile (`tsc -p tsconfig.json`) | Passed with TypeScript 5.8.3 and temporary declarations for unavailable external modules; the pinned TypeScript 5.4.5 install could not be fetched |
+| Automated tests (`npm test`) | 11 passed, 0 failed in the offline validation harness |
 | Installer shell syntax (`bash -n install.sh`) | Passed |
 | Installer staging/upgrade simulation | Passed using temporary fake `npm`/`node` commands |
 | Failed-build protection simulation | Passed; existing application directory remained untouched |
-| CLI version smoke test | Passed (`1.0.1`) |
+| CLI version smoke test | Passed (`1.0.2`) |
 | Exact remote `curl | bash` command | Not verified; DNS resolution to `raw.githubusercontent.com` failed from this environment |
 | Real dependency installation from npm | Not verified; npm registry access was unavailable |
 | Live Google AI Studio / OpenAI-compatible calls | Not verified; no API credentials were supplied |
@@ -52,3 +52,8 @@ No `package-lock.json` was generated because the npm registry was unreachable. D
 ## GitHub deployment requirement
 
 This ZIP updates only the supplied local project copy. It does not push changes to the GitHub repository. The one-line installer URL points to the repository's `main` branch; the updated source, especially `install.sh`, must be committed/published to that branch before the exact `curl -fsSL .../main/install.sh | bash` command can install this repaired version. The remote script could not be updated or executed from this environment.
+
+
+## Follow-up build fix (1.0.2)
+
+The subsequent Termux install log exposed a compiler failure in four files importing `uuid@9.0.1`. The package release metadata does not declare a TypeScript declaration entry, so the compiler reported TS7016. The project now uses `randomUUID` from `node:crypto` in `GoogleAIProvider`, `OpenAICompatProvider`, `ConversationStore`, and `MemoryStore`; the `uuid` dependency was removed from `package.json`. Regression checks assert that generated provider tool-call IDs, conversation IDs, and memory IDs remain valid UUID v4 values. The updated offline harness passed 11 tests. This update does not depend on adding a stub declaration or an external `@types/uuid` package.

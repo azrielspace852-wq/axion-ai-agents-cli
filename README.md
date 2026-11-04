@@ -8,6 +8,10 @@ A terminal-based AI agent by **AXION Neuralis**. AXION provides an interactive c
 
 > AXION is an API-backed CLI application. You must provide credentials for the selected model provider before chatting.
 
+## Build compatibility (1.0.2)
+
+Version 1.0.2 fixes a TypeScript build error (`TS7016`) involving the `uuid` package. UUID v4 identifiers are now generated with Node.js' built-in `crypto.randomUUID()` API, so the project no longer needs the external `uuid` package or separate UUID type declarations. This is compatible with the project's Node.js 18.17.0 minimum requirement.
+
 ## Features
 
 - **Interactive terminal REPL** with slash commands and English/Indonesian interface text.

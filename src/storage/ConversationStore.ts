@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { CONVERSATIONS_DIR } from '../config/paths';
 import { ensurePrivateDir, writeJsonAtomically } from '../utils/jsonFile';
 import type { ChatMessage } from '../types';
@@ -57,7 +57,7 @@ export class ConversationStore {
   create(name?: string): ConversationFile {
     this.ensure();
     const doc: ConversationFile = {
-      'conversation-id': uuidv4(),
+      'conversation-id': randomUUID(),
       'conversation-name': name?.trim() || `Chat ${new Date().toISOString()}`,
       messages: [],
     };
