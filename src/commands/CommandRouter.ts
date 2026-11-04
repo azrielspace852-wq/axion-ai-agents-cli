@@ -1,0 +1,48 @@
+import { CommandContext, HandlerResult } from './CommandContext';
+import * as H from './handlers';
+import { t } from '../i18n';
+
+export class CommandRouter {
+  async route(input: string, ctx: CommandContext): Promise<HandlerResult> {
+    const line = input.trim();
+    if (!line.startsWith('/')) return {};
+    const [cmdRaw, ...rest] = line.slice(1).split(/\s+/);
+    const cmd = cmdRaw.toLowerCase();
+    ctx.args = rest.join(' ');
+
+    switch (cmd) {
+      case 'models':
+        return (await H.handleModels(ctx)) || {};
+      case 'thinking':
+        return (await H.handleThinking(ctx)) || {};
+      case 'instructions':
+        return (await H.handleInstructions(ctx)) || {};
+      case 'memory':
+        return (await H.handleMemory(ctx)) || {};
+      case 'api-key':
+      case 'apikey':
+        return (await H.handleApiKey(ctx)) || {};
+      case 'permissions':
+        return (await H.handlePermissions(ctx)) || {};
+      case 'provider':
+        return (await H.handleProvider(ctx)) || {};
+      case 'clear':
+        return (await H.handleClear(ctx)) || {};
+      case 'conversation':
+      case 'conversations':
+        return (await H.handleConversation(ctx)) || {};
+      case 'language':
+      case 'lang':
+        return (await H.handleLanguage(ctx)) || {};
+      case 'help':
+      case '?':
+        return (await H.handleHelp(ctx)) || {};
+      case 'exit':
+      case 'quit':
+        return H.handleExit();
+      default:
+        ctx.repl.print(t('err.unknownCmd', { cmd }));
+        return {};
+    }
+  }
+}

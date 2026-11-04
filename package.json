@@ -1,0 +1,39 @@
+{
+  "name": "axion-ai-agents-cli",
+  "version": "1.0.0",
+  "description": "AXION AI Agents CLI - Autonomous AI agent optimized for Termux and Unix-like systems",
+  "license": "GPL-3.0-or-later",
+  "author": "AXION Neuralis",
+  "bin": {
+    "axion-cli": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "termux",
+    "gemini",
+    "gemma",
+    "llm",
+    "autonomous"
+  ],
+  "dependencies": {
+    "axios": "^1.7.2",
+    "chalk": "^4.1.2",
+    "cheerio": "^1.0.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}
