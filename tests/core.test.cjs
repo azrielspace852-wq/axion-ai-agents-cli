@@ -153,7 +153,8 @@ test('Gemini provider returns thought signatures and groups parallel function re
     assert.deepEqual(capturedBodies[2].generationConfig.thinkingConfig, { thinkingLevel: 'MEDIUM' });
     assert.deepEqual(capturedBodies[3].generationConfig.thinkingConfig, { thinkingBudget: 0 });
     assert.equal(Object.hasOwn(capturedBodies[4].generationConfig, 'thinkingConfig'), false);
-    assert.deepEqual(capturedBodies[5].generationConfig.thinkingConfig, { thinkingLevel: 'MINIMAL' });
+    // Gemma 4 with thinking 'off' must NOT send thinkingConfig at all (MINIMAL does not disable thinking).
+    assert.equal(Object.hasOwn(capturedBodies[5].generationConfig, 'thinkingConfig'), false);
     assert.deepEqual(capturedBodies[6].generationConfig.thinkingConfig, { thinkingLevel: 'HIGH' });
   } finally {
     axios.post = originalPost;
@@ -251,7 +252,7 @@ test('CLI version command starts without entering the interactive REPL', () => {
     env: { ...process.env },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^1\.1\.0\s*$/);
+  assert.match(result.stdout, /^1\.3\.0\s*$/);
 });
 
 test('installer validates in staging and preserves the prior app if a build fails', () => {
@@ -507,4 +508,42 @@ test('selected custom model metadata is applied only when its provider matches a
   cfg.openaiCompatible = { baseUrl: '', apiKey: '' };
   const agent = new Agent(() => cfg, () => {});
   assert.equal(agent.hasApiKey(), true, 'active Google provider should not be overridden by a mismatched OpenAI custom model');
+});
+
+test('terminal --help lists both terminal and in-chat commands', () => {
+  const result = spawnSync(process.execPath, [path.join(__dirname, '../dist/index.js'), '--help'], {
+    encoding: 'utf8', env: { ...process.env },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Terminal commands/);
+  assert.match(result.stdout, /In-chat commands/);
+  assert.match(result.stdout, /\/privacy-policy/);
+  assert.match(result.stdout, /\/max-token/);
+  assert.match(result.stdout, /\/max-tool-call/);
+  assert.match(result.stdout, /update --info/);
+});
+
+test('terminal update --info shows installed vs latest without updating', () => {
+  const result = spawnSync(process.execPath, [path.join(__dirname, '../dist/index.js'), 'update', '--info'], {
+    encoding: 'utf8', env: { ...process.env }, timeout: 20000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Installed version:/);
+  assert.match(result.stdout, /Latest available:/);
+});
+
+test('terminal update dry-run prints the exact install URL', () => {
+  const result = spawnSync(process.execPath, [path.join(__dirname, '../dist/index.js'), 'update'], {
+    encoding: 'utf8', env: { ...process.env, AXION_UPDATE_DRY_RUN: '1' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /curl -fsSL https:\/\/raw\.githubusercontent\.com\/azrielspace852-wq\/axion-ai-agents-cli\/main\/install\.sh \| bash/);
+});
+
+test('terminal --feedback prints support contacts and exits cleanly on EOF', () => {
+  const result = spawnSync(process.execPath, [path.join(__dirname, '../dist/index.js'), '--feedback'], {
+    encoding: 'utf8', env: { ...process.env }, input: '', timeout: 15000,
+  });
+  assert.match(result.stdout, /axionneuralis@gmail\.com/);
+  assert.match(result.stdout, /github\.com\/azrielspace852-wq/);
 });

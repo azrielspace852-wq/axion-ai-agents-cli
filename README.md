@@ -8,9 +8,13 @@ A terminal-based AI agent by **AXION Neuralis**. AXION provides an interactive c
 
 > AXION is an API-backed CLI application. You must provide credentials for the selected model provider before chatting.
 
-## Release notes (1.1.0)
+## Release notes (1.3.0)
 
-Version 1.1.0 adds the requested CLI UX and agent controls: feedback contacts, workspace/global access policy, arrow-key menus, first-run help, animated thinking indicator, bottom-anchored rounded input frame, editable memory, custom-model management, an explicit system prompt, task-planning guidance, and a configurable per-request tool-call limit (default 30). It retains the 1.0.2 build fix based on Node.js `crypto.randomUUID()`.
+Version 1.3.0 verifies the terminal UI rendering path end-to-end under a pseudo-TTY with a mocked provider (single persistent input prompt, AI replies visible, menu cleanup), adds direct terminal commands (`--help` full, `--feedback`, `update --info`), and makes `install.sh` explicitly preserve user data in `~/.axn-cli` while uninstalling only the old application directory.
+
+Version 1.2.0 fixed the Gemma 4 thinking-off loop, removed the full-screen alt-screen mode and bottom-anchored input frame (replies now scroll normally above a persistent prompt), added inline `/` command autocomplete, in-memory conversation buffering with flush at session boundaries, `/privacy-policy`, `/max-token`, `/max-tool-call` alias, provider-filtered `/models`, the `axn-cli` binary alias, and `version.json`/`update-info.json` version checking.
+
+Version 1.1.0 adds the requested CLI UX and agent controls: feedback contacts, workspace/global access policy, arrow-key menus, first-run help, animated thinking indicator, editable memory, custom-model management, an explicit system prompt, task-planning guidance, and a configurable per-request tool-call limit (default 30). It retains the 1.0.2 build fix based on Node.js `crypto.randomUUID()`.
 
 ## Features
 
@@ -86,20 +90,35 @@ To select another provider, use `/provider`. For an OpenAI-compatible provider, 
 
 ## Commands
 
-At the first interactive launch, AXION automatically prints the help reference. In interactive terminals the app switches to the alternate full-screen buffer; set `AXION_NO_ALT_SCREEN=1` to disable that behavior. The input panel is anchored to the terminal bottom. On Termux, it follows the terminal viewport size and therefore stays at the bottom edge of the area above the on-screen keyboard when the terminal resizes.
+AXION runs as a normal scrolling terminal chat: AI replies print above a single persistent input prompt. Typing `/` at the start of a line opens an inline command-suggestion popup (ArrowUp/ArrowDown to navigate, Enter to fill the highlighted command, Esc to dismiss). Set `AXION_NO_AUTOCOMPLETE=1` to disable the popup (useful for scripting). The old full-screen/alt-screen mode and bottom-anchored input frame were removed in v1.2.0.
+
+### Terminal commands (without entering chat)
+
+| Command | Description |
+|---|---|
+| `axion-cli` (no args) | Enter interactive chat mode. `axn-cli` is an alias. |
+| `axion-cli --help` / `-h` | Show full help: terminal + in-chat commands. |
+| `axion-cli --version` / `-v` | Print the installed version (from `dist/version.json`). |
+| `axion-cli --feedback` | Show support contacts, then enter chat. |
+| `axion-cli update --info` | Show latest available version, release notes, and update instructions (does NOT update). |
+| `axion-cli update` | Fast update: `curl -fsSL <install.sh> \| bash`. `AXION_UPDATE_DRY_RUN=1` prints the command without running it. |
+
+### In-chat commands (type inside the REPL)
 
 | Command | Description |
 |---|---|
 | `/help` | Show available commands. |
-| `/models` | Select built-in models; add, edit, or delete custom models. Built-in models cannot be deleted. |
+| `/models` | Select/add/edit/delete models; lists only models of the active provider. Built-in models cannot be deleted. |
 | `/provider` | Switch between Google AI Studio and OpenAI-compatible providers. |
 | `/api-key` | Set or update the active provider's API key. |
-| `/thinking` | Configure the requested reasoning level. Actual support depends on the selected model. |
+| `/thinking` | Configure the requested reasoning level (off/low/medium/high/max). Actual support depends on the selected model. |
 | `/system` | View or edit the additional system prompt (legacy `/instructions` remains an alias). |
 | `/memory` | List, add, edit entries, rename topics, delete entries/topics, or clear memory. |
 | `/permissions` | Enable or disable agent tools and local access permissions. |
 | `/acces` | Choose workspace-only or global agent access policy (`/access` is an alias). |
-| `/tool-limit` | Set the maximum number of tool calls per request (default 30; allowed range 1–100). |
+| `/tool-limit` | Set the maximum number of tool calls per request (default 30; allowed range 1–100). `/max-tool-call` is an alias. |
+| `/max-token` | Set an optional input-token soft cap (honest chars/4 estimate, oldest non-system messages trimmed first) and an output-token cap forwarded to the provider. |
+| `/privacy-policy` | Show honest security & privacy information (local storage, what is sent to providers, no AXION telemetry, risks, controls). |
 | `/feedback` | Show AXION support email addresses and the GitHub issue tracker. |
 | `/conversation` | Open, delete, back up, or create a conversation. |
 | `/language` | Switch the interface language between English and Indonesian. |

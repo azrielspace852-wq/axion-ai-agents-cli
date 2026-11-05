@@ -14,6 +14,7 @@ export interface ReplLike {
   openConversation(id: string): boolean;
   newConversation(): void;
   currentConversationId(): string;
+  flushConversation(): void;
 }
 
 export interface CommandContext {

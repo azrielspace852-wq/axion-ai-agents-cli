@@ -1,6 +1,0 @@
-{
-  "latestVersion": "1.2.0",
-  "releaseNotes": "v1.2.0: fixed Gemma 4 thinking-off, reworked terminal UI (persistent prompt, visible replies), command suggestion popup, in-memory conversation buffering, /privacy-policy, /max-token, /max-tool-call alias, /models filtered by active provider, axn-cli binary alias, version.json + update check.",
-  "publishedAt": "2026-11-05",
-  "installUrl": "https://raw.githubusercontent.com/azrielspace852-wq/axion-ai-agents-cli/main/install.sh"
-}

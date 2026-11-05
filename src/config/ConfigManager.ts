@@ -29,6 +29,8 @@ export const DEFAULT_CONFIG: AxionConfig = {
   permissions: { ...DEFAULT_PERMISSIONS },
   accessScope: 'workspace',
   maxToolCallsPerRequest: 30,
+  maxInputTokens: undefined,
+  maxOutputTokens: undefined,
   hasCompletedOnboarding: false,
 };
 
@@ -38,6 +40,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+function normalizeTokenLimit(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const n = Math.floor(value);
+  return n >= 1 ? n : undefined;
 }
 
 function parseCustomModels(value: unknown): CustomModel[] {
@@ -85,6 +93,8 @@ function normalizeConfig(value: unknown, existingConfig: boolean): AxionConfig {
     maxToolCallsPerRequest: Number.isInteger(parsed.maxToolCallsPerRequest)
       ? Math.min(100, Math.max(1, Number(parsed.maxToolCallsPerRequest)))
       : DEFAULT_CONFIG.maxToolCallsPerRequest,
+    maxInputTokens: normalizeTokenLimit(parsed.maxInputTokens),
+    maxOutputTokens: normalizeTokenLimit(parsed.maxOutputTokens),
     // Existing installations are treated as already onboarded; only a fresh config sees first-run help.
     hasCompletedOnboarding: typeof parsed.hasCompletedOnboarding === 'boolean'
       ? parsed.hasCompletedOnboarding

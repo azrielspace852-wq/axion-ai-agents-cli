@@ -44,6 +44,20 @@ APP_DIR="$APP_PARENT/$APP_NAME"
 [ "$APP_DIR" != "/" ] || fail "Refusing to install to filesystem root."
 [ "$APP_DIR" != "$(cd "$HOME" && pwd -P)" ] || fail "Refusing to use the home directory itself as the application directory."
 
+# --- User data preservation (explicit) --------------------------------------
+# This installer only manages the application directory (APP_DIR, default ~/.axion/app).
+# User data (config incl. API keys, conversations, memory) lives in ~/.axn-cli and
+# is NEVER touched by this script. No rm/rmtree in this script references it.
+USER_DATA_DIR="${AXION_DATA_DIR:-$HOME/.axn-cli}"
+if [ -e "$USER_DATA_DIR" ]; then
+  ok "User data preserved: $USER_DATA_DIR (config, conversations, memory are not modified)"
+else
+  info "No existing user data directory at $USER_DATA_DIR (will be created on first run)"
+fi
+case "$USER_DATA_DIR" in
+  "$APP_DIR"|"$APP_DIR"/*) fail "Refusing to continue: user data dir ($USER_DATA_DIR) is inside the application dir ($APP_DIR)." ;;
+esac
+
 # Work only in a temporary directory until install and build checks succeed.
 TMP_DIR="$(mktemp -d)" || fail "Could not create a temporary directory."
 STAGE_DIR="$APP_PARENT/.${APP_NAME}.stage.$$"
@@ -121,13 +135,23 @@ pick_bin_dir() {
 
 BIN_DIR="$(pick_bin_dir)"
 COMMAND_LINK="$BIN_DIR/axion-cli"
-if [ -e "$COMMAND_LINK" ] && [ ! -L "$COMMAND_LINK" ]; then
-  fail "Refusing to overwrite an existing non-symlink command: $COMMAND_LINK"
-fi
+COMMAND_LINK_ALIAS="$BIN_DIR/axn-cli"
+for link in "$COMMAND_LINK" "$COMMAND_LINK_ALIAS"; do
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    fail "Refusing to overwrite an existing non-symlink command: $link"
+  fi
+done
 
 # --- 5. Replace application directory safely -------------------------------
+# Uninstall the old application: move it to a backup (preserved for rollback),
+# then ensure the old APP_DIR path is gone so no stale file can conflict with
+# the new install. User data (~/.axn-cli) is never touched.
 if [ -e "$APP_DIR" ] || [ -L "$APP_DIR" ]; then
   mv "$APP_DIR" "$BACKUP_DIR" || fail "Could not move the previous installation aside. It has not been deleted."
+  ok "Old application backed up to $BACKUP_DIR (user data at $USER_DATA_DIR was left untouched)"
+fi
+if [ -e "$APP_DIR" ] || [ -L "$APP_DIR" ]; then
+  rm -rf -- "$APP_DIR" || fail "Could not remove stale application directory at $APP_DIR."
 fi
 if ! mv "$STAGE_DIR" "$APP_DIR"; then
   if [ -e "$BACKUP_DIR" ]; then mv "$BACKUP_DIR" "$APP_DIR" || warn "Automatic rollback failed; previous installation remains at $BACKUP_DIR"; fi
@@ -136,7 +160,8 @@ fi
 
 # --- 6. Create command link -------------------------------------------------
 ln -sfn "$APP_DIR/dist/index.js" "$COMMAND_LINK" || fail "Could not create command link at $COMMAND_LINK"
-ok "Command linked: $COMMAND_LINK"
+ln -sfn "$APP_DIR/dist/index.js" "$COMMAND_LINK_ALIAS" || fail "Could not create command alias at $COMMAND_LINK_ALIAS"
+ok "Command linked: $COMMAND_LINK (alias: $COMMAND_LINK_ALIAS)"
 
 if [ -e "$BACKUP_DIR" ]; then
   warn "Previous application files were retained at: $BACKUP_DIR"
@@ -148,6 +173,6 @@ esac
 
 printf '\n'
 ok "AXION AI Agents CLI installed successfully."
-info "Run: axion-cli"
+info "Run: axion-cli  (or: axn-cli)"
 info "Application: $APP_DIR"
 info "Configuration and user data: $HOME/.axn-cli"

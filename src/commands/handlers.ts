@@ -35,9 +35,11 @@ export async function handleModels(ctx: CommandContext): Promise<HandlerResult |
   if (actions === 2) return editCustomModel(ctx);
   if (actions === 3) return deleteCustomModel(ctx);
 
-  const all: CustomModel[] = [...DEFAULT_MODELS, ...ctx.config.customModels];
-  const selected = await choose(ctx, 'Select model', [
-    ...all.map((model) => `${model.label} (${model.id}) — ${model.provider}${model.id === ctx.config.model ? ' [active]' : ''}`),
+  const active = ctx.config.activeProvider;
+  const all: CustomModel[] = [...DEFAULT_MODELS, ...ctx.config.customModels].filter((model) => model.provider === active);
+  if (!all.length) return ctx.repl.print(`No models available for provider "${active}". Add one with "Add custom model" or switch provider with /provider.`);
+  const selected = await choose(ctx, `Select model (provider: ${active})`, [
+    ...all.map((model) => `${model.label} (${model.id})${model.id === ctx.config.model ? ' [active]' : ''}`),
     'Cancel',
   ]);
   if (selected === null || selected >= all.length) return;
@@ -272,12 +274,14 @@ export async function handleProvider(ctx: CommandContext): Promise<HandlerResult
 }
 
 export async function handleClear(ctx: CommandContext): Promise<HandlerResult | void> {
+  ctx.repl.flushConversation();
   ctx.repl.clearScreen();
   ctx.repl.resetContext();
   ctx.repl.print(chalk.dim('Screen and current context cleared. History file kept.'));
 }
 
 export async function handleConversation(ctx: CommandContext): Promise<HandlerResult | void> {
+  ctx.repl.flushConversation();
   const list = ctx.conversations.list();
   if (!list.length) return ctx.repl.print('No saved conversations.');
   const actions = await choose(ctx, 'Conversation actions', ['Open conversation', 'New conversation', 'Delete conversation', 'Backup conversation', 'Cancel']);
@@ -325,7 +329,10 @@ export async function handleHelp(ctx: CommandContext): Promise<HandlerResult | v
     ['/memory', t('help.memory')],
     ['/api-key', t('help.apikey')],
     ['/permissions', t('help.permissions')],
-    ['/tool-limit', 'Set the maximum tool calls allowed per request (default: 30)'],
+    ['/tool-limit', t('help.toolLimit')],
+    ['/max-tool-call', t('help.maxToolCall')],
+    ['/max-token', t('help.maxToken')],
+    ['/privacy-policy', t('help.privacyPolicy')],
     ['/provider', t('help.provider')],
     ['/clear', t('help.clear')],
     ['/conversation', t('help.conversation')],
@@ -335,6 +342,81 @@ export async function handleHelp(ctx: CommandContext): Promise<HandlerResult | v
   ];
   ctx.repl.print(chalk.bold(t('help.title')) + ':');
   for (const [command, description] of cmds) ctx.repl.print(`  ${chalk.cyan(command.padEnd(16))} ${description}`);
+}
+
+export async function handlePrivacyPolicy(ctx: CommandContext): Promise<HandlerResult | void> {
+  const lines: string[] = [
+    chalk.bold('AXION AI Agents CLI — Security & Privacy (honest summary)'),
+    '',
+    chalk.bold('1. Where your data is stored'),
+    `   • All local data lives in ~/.axn-cli (override with $AXION_DATA_DIR):`,
+    '     - config.json (including API keys), conversations/, memory/, instructions/',
+    '     - Files are written with mode 0600 and directories with 0700 (owner-only).',
+    '   • API keys are stored in plain text in the local config file. There is NO',
+    '     end-to-end encryption and no OS keychain integration. Anyone with read',
+    '     access to your home directory can read them.',
+    '',
+    chalk.bold('2. What is sent to AI providers'),
+    '   • When you chat, the following are sent to the active LLM provider',
+    '     (Google AI Studio or your configured OpenAI-compatible endpoint):',
+    '     - your messages and the conversation history,',
+    '     - the system prompt (including a top-level listing of workspace files),',
+    '     - tool definitions and, when tools run, tool results (web pages, search',
+    '       results, shell command output, file contents the agent reads).',
+    '   • That data is governed by the provider\'s own privacy policy, not by AXION.',
+    '',
+    chalk.bold('3. What AXION itself does NOT do'),
+    '   • No telemetry, analytics, or crash reporting is sent to any AXION server.',
+    '   • No third-party tracking. The only network calls are: the LLM provider API,',
+    '     web search / page fetch triggered by tools (to public hosts only), and the',
+    '     optional update check / update command to GitHub raw content.',
+    '',
+    chalk.bold('4. Risks you should understand'),
+    '   • The shell tool executes commands with YOUR user privileges. Workspace',
+    '     "access scope" is an agent policy, not an OS sandbox.',
+    '   • `axn-cli update` downloads and runs a remote shell script (curl | bash)',
+    '     from the project\'s GitHub repository. Inspect install.sh before trusting it.',
+    '   • Conversation history may contain sensitive text; it is stored locally in',
+    '     plain JSON. Delete it manually any time via /conversation or rm -rf ~/.axn-cli.',
+    '',
+    chalk.bold('5. Your controls'),
+    '   • /clear resets in-memory context; /conversation lets you delete/backup saved chats.',
+    '   • /permissions toggles web/search/shell access; /api-key rotates the stored key.',
+    '   • To erase everything: remove the ~/.axn-cli directory.',
+    '',
+    chalk.dim('This summary is informational, not legal advice. Review the provider policies and LICENSE (GPL-3.0).'),
+  ];
+  for (const line of lines) ctx.repl.print(line);
+}
+
+export async function handleMaxToken(ctx: CommandContext): Promise<HandlerResult | void> {
+  const cfg = ctx.config;
+  const fmt = (n: number | undefined) => (typeof n === 'number' ? String(n) : 'unset (no limit)');
+  ctx.repl.print(chalk.bold('Token limits'));
+  ctx.repl.print(`  Input soft cap (maxInputTokens):  ${fmt(cfg.maxInputTokens)}`);
+  ctx.repl.print(`  Output cap (maxOutputTokens):     ${fmt(cfg.maxOutputTokens)}`);
+  ctx.repl.print(chalk.dim('  Note: input tokens are ESTIMATED as characters/4 (no real tokenizer is bundled).'));
+  ctx.repl.print(chalk.dim('  When over the cap, oldest non-system messages are dropped first. This is approximate.'));
+  const action = await choose(ctx, 'Change which limit?', ['Set input soft cap', 'Set output cap', 'Clear both', 'Cancel']);
+  if (action === null || action === 3) return;
+  if (action === 2) {
+    cfg.maxInputTokens = undefined;
+    cfg.maxOutputTokens = undefined;
+    ctx.saveConfig();
+    return ctx.repl.print('Token limits cleared.');
+  }
+  const raw = (await ctx.repl.question(action === 0
+    ? 'Input soft cap in tokens (positive integer, blank to keep current): '
+    : 'Output cap in tokens forwarded to the provider (positive integer, blank to keep current): ')).trim();
+  if (!raw) return ctx.repl.print('Unchanged.');
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) return ctx.repl.print('Invalid value. Enter a positive integer. No changes were saved.');
+  if (action === 0) cfg.maxInputTokens = value;
+  else cfg.maxOutputTokens = value;
+  ctx.saveConfig();
+  ctx.repl.print(action === 0
+    ? `Input soft cap set to ~${value} tokens (estimated as chars/4; oldest messages trimmed first).`
+    : `Output cap set to ${value} tokens (forwarded to the provider as maxOutputTokens/max_tokens).`);
 }
 
 export async function handleExit(): Promise<HandlerResult> {

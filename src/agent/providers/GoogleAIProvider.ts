@@ -15,8 +15,10 @@ const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 function buildThinkingConfig(model: string, level: ProviderChatOptions['thinkingLevel']): Record<string, unknown> | undefined {
   if (!level) return undefined;
   if (/^gemma-4-/i.test(model)) {
-    // Gemma 4 exposes a binary thinking switch: MINIMAL is off, HIGH is on.
-    return { thinkingLevel: level === 'off' ? 'MINIMAL' : 'HIGH' };
+    // Gemma 4 exposes a binary thinking switch: MINIMAL does NOT disable thinking.
+    // When the user selects 'off', omit thinkingConfig entirely so the provider uses its non-thinking default.
+    if (level === 'off') return undefined;
+    return { thinkingLevel: 'HIGH' };
   }
   if (/^gemini-3(?:\.|-)/i.test(model)) {
     if (level === 'off') return undefined;

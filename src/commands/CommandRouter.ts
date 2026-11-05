@@ -2,6 +2,13 @@ import { CommandContext, HandlerResult } from './CommandContext';
 import * as H from './handlers';
 import { t } from '../i18n';
 
+// Canonical command list used by /help and the inline suggestion popup.
+export const COMMAND_LIST: string[] = [
+  '/help', '/exit', '/models', '/thinking', '/system', '/memory', '/api-key',
+  '/permissions', '/tool-limit', '/max-tool-call', '/max-token', '/privacy-policy',
+  '/provider', '/clear', '/conversation', '/language', '/feedback', '/access', '/acces',
+];
+
 export class CommandRouter {
   async route(input: string, ctx: CommandContext): Promise<HandlerResult> {
     const line = input.trim();
@@ -18,7 +25,12 @@ export class CommandRouter {
         return (await H.handleAccess(ctx)) || {};
       case 'tool-limit':
       case 'tool-calls':
+      case 'max-tool-call':
         return (await H.handleToolLimit(ctx)) || {};
+      case 'max-token':
+        return (await H.handleMaxToken(ctx)) || {};
+      case 'privacy-policy':
+        return (await H.handlePrivacyPolicy(ctx)) || {};
       case 'models':
         return (await H.handleModels(ctx)) || {};
       case 'thinking':

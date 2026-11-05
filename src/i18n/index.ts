@@ -22,6 +22,10 @@ const dict: Record<Lang, Record<string, string>> = {
     'help.language': 'Change interface language (en/id)',
     'help.help': 'Show this help',
     'help.exit': 'Exit the app safely',
+    'help.toolLimit': 'Set the maximum tool calls allowed per request (default: 30)',
+    'help.maxToolCall': 'Alias for /tool-limit: maximum tool calls per request',
+    'help.maxToken': 'Set optional input-token soft cap and output-token limit',
+    'help.privacyPolicy': 'Show security and privacy information',
   },
   id: {
     'app.subtitle': 'AI Agents CLI By AXION Neuralis',
@@ -44,6 +48,10 @@ const dict: Record<Lang, Record<string, string>> = {
     'help.language': 'Ganti bahasa antarmuka (en/id)',
     'help.help': 'Tampilkan bantuan ini',
     'help.exit': 'Keluar dari aplikasi dengan aman',
+    'help.toolLimit': 'Atur maksimal tool calls per request (default: 30)',
+    'help.maxToolCall': 'Alias untuk /tool-limit: maksimal tool calls per request',
+    'help.maxToken': 'Atur batas lembut token input dan batas token output',
+    'help.privacyPolicy': 'Tampilkan informasi keamanan & privasi',
   },
 };
 

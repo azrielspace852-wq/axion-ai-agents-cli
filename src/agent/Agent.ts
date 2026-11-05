@@ -125,6 +125,19 @@ export class Agent {
     const syncHistory = (): void => {
       history.splice(0, history.length, ...messages);
     };
+    // Honest input-token cap: estimate tokens as chars/4 (no real tokenizer is
+    // bundled), drop oldest non-system messages until under the soft cap.
+    if (typeof cfg.maxInputTokens === 'number' && cfg.maxInputTokens >= 1) {
+      const estimate = (m: ChatMessage): number => Math.ceil((m.content || '').length / 4);
+      let total = messages.reduce((sum, m) => sum + estimate(m), 0);
+      while (total > cfg.maxInputTokens && messages.length > 1) {
+        const idx = messages.findIndex((m) => m.role !== 'system');
+        if (idx < 0) break;
+        total -= estimate(messages[idx]);
+        messages.splice(idx, 1);
+      }
+      syncHistory();
+    }
     const maxToolCalls = cfg.maxToolCallsPerRequest;
     let toolCallsExecuted = 0;
     const MAX_ITER = maxToolCalls + 2;
@@ -136,6 +149,7 @@ export class Agent {
         systemPrompt,
         tools: this.tools.definitions(),
         thinkingLevel: cfg.thinkingLevel,
+        ...(typeof cfg.maxOutputTokens === 'number' ? { maxOutputTokens: cfg.maxOutputTokens } : {}),
       });
 
       if (res.toolCalls && res.toolCalls.length) {

@@ -1,0 +1,6 @@
+{
+  "latestVersion": "1.3.0",
+  "releaseNotes": "v1.3.0: verified terminal UI rendering (single persistent input prompt, AI replies visible, menu cleanup) via pseudo-TTY mock test; added direct terminal commands (--help full, --feedback, update --info); install.sh explicitly preserves ~/.axn-cli user data and uninstalls old app after backup; documentation refresh (README, /help en+id).",
+  "publishedAt": "2026-11-05",
+  "installUrl": "https://raw.githubusercontent.com/azrielspace852-wq/axion-ai-agents-cli/main/install.sh"
+}
