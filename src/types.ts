@@ -61,12 +61,16 @@ export interface AgentTool {
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 
+export type DangerousActionMode = 'always-allow' | 'always-ask' | 'always-deny';
+
 export interface PermissionSettings {
   webAccess: boolean;
   searchAccess: boolean;
   shellExec: boolean;
   fileRead: boolean;
   fileWrite: boolean;
+  // Per-action dangerous command permissions
+  dangerousActions: Record<string, DangerousActionMode>;
 }
 
 export type ProviderType = 'google-ai-studio' | 'openai-compatible';
@@ -78,6 +82,13 @@ export interface CustomModel {
   baseUrl?: string; // optional per-model OpenAI-compatible endpoint
 }
 
+export interface CustomProvider {
+  name: string;           // unique user-defined name
+  providerType: ProviderType;
+  baseUrl: string;        // for openai-compatible
+  apiKey: string;         // encrypted or plain (stored with restrictive perms)
+}
+
 export interface AxionConfig {
   version: 1;
   language: 'en' | 'id';
@@ -86,6 +97,7 @@ export interface AxionConfig {
   openaiCompatible: { baseUrl: string; apiKey: string };
   model: string;                 // currently selected model id
   customModels: CustomModel[];
+  customProviders: CustomProvider[]; // multiple custom providers
   thinkingLevel: ThinkingLevel;
   systemPrompt: string;          // explicit system prompt (legacy instructions is migrated)
   permissions: PermissionSettings;
@@ -131,6 +143,7 @@ export const DEFAULT_PERMISSIONS: PermissionSettings = {
   shellExec: true, // owner requested shell execution enabled by default
   fileRead: true,
   fileWrite: false,
+  dangerousActions: {},
 };
 
 export const THINKING_BUDGET: Record<Exclude<ThinkingLevel, 'off'>, number> = {
@@ -141,7 +154,33 @@ export const THINKING_BUDGET: Record<Exclude<ThinkingLevel, 'off'>, number> = {
 };
 
 export const USER_AGENT =
-  'Mozilla/5.0 (compatible; AxionCLI/1.3; +https://github.com/azrielspace852-wq/axion-ai-agents-cli)';
+  'Mozilla/5.0 (compatible; AxionCLI/1.4; +https://github.com/azrielspace852-wq/axion-ai-agents-cli)';
 
 export const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+// Known dangerous commands that require permission checks
+export const DANGEROUS_COMMANDS = [
+  'rm -rf',
+  'git push',
+  'git push --force',
+  'git push -f',
+  'dd',
+  'mkfs',
+  'fdisk',
+  'shutdown',
+  'reboot',
+  'halt',
+  'poweroff',
+  'chmod 777',
+  'chown -R',
+  'sudo',
+  'su',
+  'curl | bash',
+  'wget | bash',
+  'npm publish',
+  'docker rmi',
+  'docker system prune',
+  'kubectl delete',
+  'terraform destroy',
+];

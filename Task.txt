@@ -1,0 +1,121 @@
+PROMPT IMPLEMENTASI — UPDATE AXION AI AGENTS CLI
+Target model: Nemotron 3 Ultra 550B a55B
+Bahasa kerja dan laporan: Indonesia
+Mode: Implementasi terkendali, aman, dan dapat diverifikasi
+
+ATURAN PALING PENTING — WAJIB DIPATUHI
+1. Jangan mengarang suatu hal yang tidak Anda yakini atau tidak Anda ketahui.
+2. Jika informasi tidak tersedia, tidak lengkap, atau meragukan, tulis UNKNOWN atau BLOCKED, lalu jelaskan informasi apa yang dibutuhkan. Jangan menebak.
+3. Jangan mengklaim selesai, lulus test, verified, atau berfungsi jika belum ada bukti eksekusi test/build/verifikasi yang nyata.
+4. Jangan melakukan perubahan di luar scope tugas ini. Tidak ada refactor besar, perubahan arsitektur besar, atau perubahan kontrak publik kecuali benar-benar diperlukan dan aman.
+5. Jangan menghapus data, history, branch, tag, commit, file konfigurasi, atau artifact pengguna tanpa izin eksplisit.
+6. Jangan menjalankan perintah berbahaya seperti rm -rf, git push, force push, drop data, atau operasi destruktif lain hanya untuk keperluan implementasi. Jika harus menguji fitur berbahaya, gunakan data dummy, sandbox, atau simulasi yang aman.
+7. Jangan membocorkan API key, secret, token, atau kredensial ke log, output CLI, dokumentasi, test, atau commit.
+8. Jika ada konflik antara aturan aman/kejujuran di bagian awal/akhir prompt ini dan detail teknis di tengah, menangkan aturan aman/kejujuran.
+
+TUJUAN TUGAS
+Lakukan update pada proyek AXION AI Agents CLI untuk menambahkan fitur Custom Provider, perbaikan UI/UX output AI, sistem konfirmasi izin untuk tindakan berbahaya, pemahaman struktur folder/file pada folder aktif, verifikasi lokal, bump versi ke 1.4.0, serta pembaruan CHANGELOG, README.md, dan file terkait.
+
+RUANG LINGKUP PEKERJAAN
+Kerjakan semua poin berikut tanpa ada yang terlewat:
+
+1. Custom Provider — Prioritas High
+- Buat fitur Custom Provider agar pengguna dapat menambahkan lebih dari satu Custom Provider.
+- Setiap Custom Provider harus memiliki nama yang unik. Tidak boleh ada nama Custom Provider yang sama.
+- Data Custom Provider harus disimpan secara permanen sehingga tetap tersedia setelah aplikasi dimuat ulang atau dijalankan kembali.
+- Saat pengguna berpindah ke provider yang sudah pernah disimpan, pengguna tidak perlu mengisi ulang base URL atau API key.
+- Alur perpindahan provider harus cukup memilih provider yang sudah tersimpan, lalu sistem memuat base URL dan API key yang relevan dari penyimpanan yang aman.
+- Jika API key atau base URL untuk provider tersimpan ternyata hilang, rusak, atau tidak valid, minta input yang diperlukan secara aman, jangan mengarang nilai.
+- Gunakan mekanisme penyimpanan konfigurasi yang sudah ada di proyek. Jika belum ada, buat mekanisme penyimpanan lokal yang sederhana, aman, konsisten, dan tidak memperkenalkan dependensi baru tanpa kebutuhan yang jelas.
+- Validasi input nama provider, base URL, dan API key secara wajar. Tampilkan pesan error yang jelas jika input tidak valid.
+- Jangan menampilkan API key secara penuh di log, output CLI, atau dokumentasi.
+
+2. UI/UX Output AI — Prioritas High
+- Ubah perilaku output CLI agar yang ditampilkan kepada pengguna adalah langkah-langkah yang sedang dilakukan AI, bukan kode yang sedang dikerjakan AI.
+- Output default harus berbentuk langkah-langkah yang mudah dibaca, misalnya: rencana tindakan, alat yang dipanggil, file yang dibaca, file yang diubah, status sukses/gagal, dan ringkasan hasil.
+- Jangan tampilkan isi kode, diff lengkap, atau konten file sensitif secara default kecuali pengguna secara eksplisit meminta mode verbose/debug atau detail teknis.
+- Jika diperlukan, sediakan opsi verbose/debug untuk melihat detail teknis, tetapi tetap jangan membocorkan secret atau API key.
+- Pastikan pesan status jelas, ringkas, dan menggunakan Bahasa Indonesia.
+
+3. Confirm / Permissions untuk Tindakan Berbahaya — Prioritas High
+- Buat atau perbarui command /permissions untuk mengatur izin tindakan berbahaya.
+- Fitur ini harus memungkinkan pengguna memilih salah satu mode izin:
+  a. Always Allow
+  b. Always Ask
+  c. Always Deny
+- Terapkan aturan ini untuk tindakan berbahaya seperti rm -rf, git push, dan perintah berisiko tinggi lain yang relevan.
+- Default yang paling aman adalah Always Ask untuk tindakan berbahaya yang belum pernah diatur.
+- Keputusan izin harus disimpan secara permanen sesuai mekanisme konfigurasi aplikasi.
+- Jika mode Always Deny aktif, tolak tindakan dengan pesan yang jelas tanpa menjalankan perintah.
+- Jika mode Always Ask aktif, minta konfirmasi sebelum menjalankan tindakan.
+- Jika mode Always Allow aktif, tindakan boleh dijalankan tanpa prompt, tetapi tetap harus dicatat dalam log/audit trail yang aman tanpa secret.
+- Pastikan tidak ada jalan pintas yang diam-diam melewati mekanisme izin ini.
+
+4. Lihat Folder dan File — Prioritas Medium
+- Saat CLI dijalankan, AI harus diberi tahu struktur folder di dalam folder kerja pengguna saat itu.
+- Tampilkan atau inject konteks struktur folder secara ringkas dan aman ke dalam konteks AI.
+- Struktur folder yang diberikan harus cukup untuk membantu AI memahami lokasi file, tetapi tidak boleh berlebihan atau membocorkan file sensitif.
+- Jika proyek memiliki mekanisme ignore seperti .gitignore atau konfigurasi sejenis, hormati mekanisme tersebut bila tersedia.
+- Setelah mengetahui struktur folder, AI harus dapat meminta operasi seperti membaca file, mengedit file, menulis file, dan operasi lain yang didukung oleh CLI.
+- Setiap operasi file yang mengubah data harus mengikuti mekanisme izin dan keamanan yang berlaku.
+- Jangan mengizinkan akses path traversal ke luar folder kerja yang sah.
+
+5. Jalankan Test Secara Lokal
+- Jalankan test yang sudah ada di proyek secara lokal.
+- Jika belum ada test untuk fitur baru, tambahkan test minimal yang relevan sesuai framework/stack yang sudah digunakan proyek.
+- Jangan menambahkan framework test baru atau dependensi baru tanpa kebutuhan yang jelas.
+- Pastikan test mencakup perilaku penting berikut:
+  a. Penambahan lebih dari satu Custom Provider.
+  b. Penolakan nama Custom Provider yang duplikat.
+  c. Penyimpanan permanen Custom Provider.
+  d. Perpindahan provider tanpa perlu mengisi ulang base URL/API key.
+  e. Output step-by-step AI pada mode normal.
+  f. Mekanisme /permissions dengan Always Allow, Always Ask, dan Always Deny.
+  g. Pemberian struktur folder awal kepada AI saat CLI dijalankan.
+  h. Update versi dan file dokumentasi tidak merusak format yang ada.
+- Jika test tidak bisa dijalankan karena lingkungan, dependensi, atau konfigurasi yang hilang, jangan berpura-pura berhasil. Laporkan status sebagai BLOCKED atau NOT_VERIFIED, lalu jelaskan penyebabnya dan langkah verifikasi yang diperlukan.
+
+6. Update File Versi
+- Update version.json agar versinya menjadi 1.4.0.
+- Update version-info.json agar versinya menjadi 1.4.0.
+- Pertahankan skema file yang sudah ada. Jangan mengubah struktur file secara sembarangan.
+- Jika version.json atau version-info.json tidak ditemukan, jangan membuat file versi palsu. Laporkan sebagai UNKNOWN/BLOCKED dan minta lokasi file versi yang benar.
+
+7. Update CHANGELOG, README.md, dan File Terkait
+- Update CHANGELOG dengan perubahan versi 1.4.0.
+- Ikuti format CHANGELOG yang sudah ada di proyek. Jika format tidak diketahui, gunakan format yang sederhana, konsisten, dan mudah dibaca.
+- Cantumkan ringkasan perubahan berikut:
+  a. Fitur Custom Provider.
+  b. Perbaikan UI/UX output step-by-step AI.
+  c. Fitur /permissions untuk Always Allow, Always Ask, Always Deny.
+  d. Fitur pembacaan struktur folder/file saat CLI dijalankan.
+  e. Update versi ke 1.4.0.
+- Update README.md jika ada bagian yang perlu disesuaikan, misalnya daftar fitur, penggunaan, atau konfigurasi.
+- Update file dokumentasi lain yang relevan jika memang diperlukan oleh perubahan ini.
+- Jangan menulis klaim berlebihan di dokumentasi. Dokumentasi harus sesuai dengan implementasi nyata.
+
+8. Instruksi Penyelesaian
+- Silakan kerjakan seluruh poin di atas secara berurutan dan teliti.
+- Jangan ada yang terlewat atau lupa, bahkan satu poin pun.
+- Gunakan perubahan paling kecil dan paling aman yang memenuhi semua requirement.
+- Jika menemukan bug atau masalah lain di luar scope, catat sebagai rekomendasi saja, jangan langsung diperbaiki kecuali perbaikan itu diperlukan agar tugas utama aman/berfungsi.
+- Jika ada keputusan teknis yang belum jelas dan berisiko tinggi, hentikan sementara dan tanyakan kepada pengguna.
+- Jika semua pekerjaan selesai, beritahu pengguna dengan laporan akhir.
+
+FORMAT LAPORAN AKHIR YANG WAJIB DIBERIKAN
+Setelah selesai, berikan laporan dalam Bahasa Indonesia dengan bagian berikut:
+1. Status akhir: SELESAI, SELESAI SEBAGIAN, BLOCKED, atau NOT_VERIFIED.
+2. Ringkasan perubahan yang dilakukan.
+3. Daftar file yang diubah/ditambahkan/dihapus, jika ada.
+4. Hasil test/build/verifikasi yang benar-benar dijalankan.
+5. Hal yang belum diverifikasi atau tidak bisa dijalankan, beserta alasannya.
+6. Risiko, catatan keamanan, atau asumsi penting yang digunakan.
+7. Pernyataan eksplisit bahwa semua poin 1 sampai 8 sudah dikerjakan, atau daftar poin yang belum selesai jika ada.
+
+ATURAN PALING PENTING DI AKHIR — WAJIB DIPATUHI
+- Jangan mengarang sesuatu yang tidak Anda yakini atau tidak Anda ketahui.
+- Jangan mengatakan semua selesai jika ada poin yang belum dikerjakan, belum diuji, atau belum diverifikasi.
+- Jangan membuat klaim test passed, build passed, atau fitur berfungsi tanpa bukti yang dapat diperiksa.
+- Jangan mengubah kontrak, perilaku, atau file lain secara diam-diam di luar scope.
+- Jika ragu, berhenti, tandai UNKNOWN/BLOCKED, dan jelaskan kebutuhan informasinya.
+- Setelah benar-benar selesai, beritahu pengguna secara jelas bahwa tugas sudah selesai.

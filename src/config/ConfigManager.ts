@@ -13,6 +13,7 @@ import {
   ProviderType,
   ThinkingLevel,
   CustomModel,
+  CustomProvider,
 } from '../types';
 import { ensurePrivateDir, writeJsonAtomically } from '../utils/jsonFile';
 
@@ -24,6 +25,7 @@ export const DEFAULT_CONFIG: AxionConfig = {
   openaiCompatible: { baseUrl: '', apiKey: '' },
   model: DEFAULT_MODEL_ID,
   customModels: [],
+  customProviders: [],
   thinkingLevel: 'medium',
   systemPrompt: '',
   permissions: { ...DEFAULT_PERMISSIONS },
@@ -63,6 +65,35 @@ function parseCustomModels(value: unknown): CustomModel[] {
   }));
 }
 
+function parseCustomProviders(value: unknown): CustomProvider[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is CustomProvider => {
+    if (!isRecord(item)) return false;
+    return typeof item.name === 'string' && item.name.trim().length > 0 &&
+      typeof item.providerType === 'string' &&
+      (item.providerType === 'google-ai-studio' || item.providerType === 'openai-compatible') &&
+      typeof item.baseUrl === 'string' &&
+      typeof item.apiKey === 'string';
+  }).map((item) => ({
+    name: item.name.trim(),
+    providerType: item.providerType,
+    baseUrl: item.baseUrl.trim(),
+    apiKey: item.apiKey,
+  }));
+}
+
+function parseDangerousActions(value: unknown): Record<string, 'always-allow' | 'always-ask' | 'always-deny'> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, 'always-allow' | 'always-ask' | 'always-deny'> = {};
+  const validModes = ['always-allow', 'always-ask', 'always-deny'];
+  for (const [key, val] of Object.entries(value)) {
+    if (typeof val === 'string' && validModes.includes(val)) {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
 function normalizeConfig(value: unknown, existingConfig: boolean): AxionConfig {
   const parsed = isRecord(value) ? value : {};
   const google = isRecord(parsed.google) ? parsed.google : {};
@@ -85,6 +116,7 @@ function normalizeConfig(value: unknown, existingConfig: boolean): AxionConfig {
     },
     model: stringValue(parsed.model, DEFAULT_MODEL_ID).trim() || DEFAULT_MODEL_ID,
     customModels: parseCustomModels(parsed.customModels),
+    customProviders: parseCustomProviders(parsed.customProviders),
     thinkingLevel: levels.includes(requestedLevel as ThinkingLevel)
       ? requestedLevel as ThinkingLevel
       : DEFAULT_CONFIG.thinkingLevel,
@@ -105,6 +137,7 @@ function normalizeConfig(value: unknown, existingConfig: boolean): AxionConfig {
       shellExec: typeof permissions.shellExec === 'boolean' ? permissions.shellExec : DEFAULT_PERMISSIONS.shellExec,
       fileRead: typeof permissions.fileRead === 'boolean' ? permissions.fileRead : DEFAULT_PERMISSIONS.fileRead,
       fileWrite: typeof permissions.fileWrite === 'boolean' ? permissions.fileWrite : DEFAULT_PERMISSIONS.fileWrite,
+      dangerousActions: parseDangerousActions(permissions.dangerousActions),
     },
   };
 }
@@ -156,6 +189,95 @@ export class ConfigManager {
 
   update(patch: Partial<AxionConfig>): void {
     this.config = normalizeConfig({ ...this.config, ...patch }, true);
+    this.save();
+  }
+
+  // Custom Provider management
+  getCustomProviders(): CustomProvider[] {
+    return this.config.customProviders;
+  }
+
+  addCustomProvider(provider: CustomProvider): { success: boolean; error?: string } {
+    // Check for duplicate name
+    if (this.config.customProviders.some(p => p.name === provider.name)) {
+      return { success: false, error: 'Nama provider sudah digunakan. Gunakan nama yang unik.' };
+    }
+    // Validate provider
+    if (!provider.name.trim()) {
+      return { success: false, error: 'Nama provider tidak boleh kosong.' };
+    }
+    if (provider.providerType === 'openai-compatible' && !provider.baseUrl.trim()) {
+      return { success: false, error: 'Base URL diperlukan untuk provider OpenAI-compatible.' };
+    }
+    if (!provider.apiKey.trim()) {
+      return { success: false, error: 'API Key tidak boleh kosong.' };
+    }
+    // Validate URL format for openai-compatible
+    if (provider.providerType === 'openai-compatible') {
+      try {
+        const url = new URL(provider.baseUrl);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+          return { success: false, error: 'Base URL harus menggunakan protokol HTTP atau HTTPS.' };
+        }
+        if (url.username || url.password) {
+          return { success: false, error: 'Base URL tidak boleh mengandung kredensial.' };
+        }
+      } catch {
+        return { success: false, error: 'Format Base URL tidak valid.' };
+      }
+    }
+    this.config.customProviders.push(provider);
+    this.save();
+    return { success: true };
+  }
+
+  removeCustomProvider(name: string): boolean {
+    const index = this.config.customProviders.findIndex(p => p.name === name);
+    if (index === -1) return false;
+    this.config.customProviders.splice(index, 1);
+    // If the removed provider was active, switch to default
+    if (this.config.activeProvider === 'openai-compatible') {
+      const activeProvider = this.config.customProviders.find(p => p.providerType === 'openai-compatible');
+      if (!activeProvider) {
+        this.config.activeProvider = 'google-ai-studio';
+      }
+    }
+    this.save();
+    return true;
+  }
+
+  getCustomProvider(name: string): CustomProvider | undefined {
+    return this.config.customProviders.find(p => p.name === name);
+  }
+
+  setActiveCustomProvider(name: string): { success: boolean; error?: string } {
+    const provider = this.config.customProviders.find(p => p.name === name);
+    if (!provider) {
+      return { success: false, error: 'Provider tidak ditemukan.' };
+    }
+    if (provider.providerType === 'openai-compatible') {
+      this.config.activeProvider = 'openai-compatible';
+      this.config.openaiCompatible = { baseUrl: provider.baseUrl, apiKey: provider.apiKey };
+    } else {
+      this.config.activeProvider = 'google-ai-studio';
+      this.config.google = { apiKey: provider.apiKey };
+    }
+    this.save();
+    return { success: true };
+  }
+
+  // Dangerous action permissions
+  getDangerousActionPermission(action: string): 'always-allow' | 'always-ask' | 'always-deny' {
+    return this.config.permissions.dangerousActions[action] || 'always-ask';
+  }
+
+  setDangerousActionPermission(action: string, mode: 'always-allow' | 'always-ask' | 'always-deny'): void {
+    this.config.permissions.dangerousActions[action] = mode;
+    this.save();
+  }
+
+  removeDangerousActionPermission(action: string): void {
+    delete this.config.permissions.dangerousActions[action];
     this.save();
   }
 }
