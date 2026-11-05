@@ -252,7 +252,7 @@ test('CLI version command starts without entering the interactive REPL', () => {
     env: { ...process.env },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^1\.3\.0\s*$/);
+  assert.match(result.stdout, /^1\.4\.0\s*$/);
 });
 
 test('installer validates in staging and preserves the prior app if a build fails', () => {
@@ -297,7 +297,10 @@ esac
     PATH: `${fakeBin}:${process.env.PATH}`,
   };
   try {
-    const failedUpgrade = spawnSync('bash', [path.join(projectRoot, 'install.sh')], {
+    // Run install.sh from a temp copy so its self-delete (after success) does not remove the project source.
+    const installScript = path.join(installHome, 'install.sh');
+    fs.copyFileSync(path.join(projectRoot, 'install.sh'), installScript);
+    const failedUpgrade = spawnSync('bash', [installScript], {
       cwd: projectRoot,
       env: { ...commonEnv, FAKE_NPM_FAIL_BUILD: '1' },
       encoding: 'utf8',
@@ -305,7 +308,7 @@ esac
     assert.notEqual(failedUpgrade.status, 0, failedUpgrade.stdout);
     assert.equal(fs.readFileSync(path.join(appDir, 'keep-old-installation.txt'), 'utf8'), 'previous version');
 
-    const successfulUpgrade = spawnSync('bash', [path.join(projectRoot, 'install.sh')], {
+    const successfulUpgrade = spawnSync('bash', [installScript], {
       cwd: projectRoot,
       env: commonEnv,
       encoding: 'utf8',
@@ -336,7 +339,8 @@ test('configuration migrates legacy instructions and clamps the per-request tool
     maxToolCallsPerRequest: 999,
   }));
   const manager = new ConfigManager();
-  assert.equal(manager.get().systemPrompt, 'legacy prompt');
+  assert.equal(manager.get().customInstructions, 'legacy prompt', 'legacy instructions migrate to customInstructions');
+  assert.equal(manager.get().systemPrompt, '', 'legacy systemPrompt field is normalized empty');
   assert.equal(manager.get().permissions.shellExec, false, 'explicit prior opt-out is preserved');
   assert.equal(manager.get().maxToolCallsPerRequest, 100);
   assert.equal(manager.needsOnboarding(), false);
@@ -358,7 +362,7 @@ test('agent system prompt describes workspace, anti-hallucination, planning, and
   const { Agent } = require('../dist/agent/Agent');
   const { DEFAULT_CONFIG } = require('../dist/config/ConfigManager');
   const cfg = structuredClone(DEFAULT_CONFIG);
-  cfg.systemPrompt = 'Use concise Indonesian.';
+  cfg.customInstructions = 'Use concise Indonesian.';
   const agent = new Agent(() => cfg, () => {});
   const prompt = agent.buildSystemPrompt('Known preference: concise');
   assert.match(prompt, /Workspace root:/);
@@ -366,6 +370,7 @@ test('agent system prompt describes workspace, anti-hallucination, planning, and
   assert.match(prompt, /TASK PLANNING/);
   assert.match(prompt, /WORKSPACE ONLY/);
   assert.match(prompt, /Use concise Indonesian/);
+  assert.match(prompt, /core rules take precedence/, 'base prompt locks core rules over custom instructions');
   assert.match(prompt, /Known preference: concise/);
 });
 
@@ -546,4 +551,84 @@ test('terminal --feedback prints support contacts and exits cleanly on EOF', () 
   });
   assert.match(result.stdout, /axionneuralis@gmail\.com/);
   assert.match(result.stdout, /github\.com\/azrielspace852-wq/);
+});
+
+// ---- v1.4.0 feature tests ----
+test('custom providers persist, enforce unique ids, and switch without re-entering credentials', () => {
+  const { ConfigManager } = require('../dist/config/ConfigManager');
+  const configPath = path.join(process.env.AXION_DATA_DIR, 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify({
+    version: 1,
+    customProviders: [
+      { id: 'my-ai', name: 'My AI', baseUrl: 'https://my.ai/v1', apiKey: 'secret-1234', defaultModel: 'my-model' },
+      { id: 'my-ai', name: 'Dup', baseUrl: 'https://dup.ai/v1', apiKey: 'x' }, // duplicate id — must be dropped
+    ],
+    activeProvider: 'my-ai',
+  }));
+  const manager = new ConfigManager();
+  const cfg = manager.get();
+  assert.equal(cfg.customProviders.length, 1, 'duplicate custom provider id is dropped');
+  assert.equal(cfg.customProviders[0].id, 'my-ai');
+  assert.equal(cfg.activeProvider, 'my-ai', 'activeProvider can be a custom provider id');
+  // Switching to the custom provider loads baseUrl/apiKey/model automatically (no re-entry).
+  const { Agent } = require('../dist/agent/Agent');
+  const agent = new Agent(() => cfg, () => {});
+  assert.equal(agent.hasApiKey(), true, 'custom provider api key is loaded from config');
+});
+
+test('dangerous action policy defaults to always-ask and allow/deny are respected', () => {
+  const { ConfigManager, DEFAULT_CONFIG } = require('../dist/config/ConfigManager');
+  assert.equal(DEFAULT_CONFIG.dangerousActionPolicy, 'always-ask', 'default policy is always-ask');
+  const { dangerousCommandReason } = require('../dist/agent/tools/ShellTool');
+  assert.ok(dangerousCommandReason('rm -rf /tmp/x'), 'rm -rf detected as dangerous');
+  assert.ok(dangerousCommandReason('git push origin main'), 'git push detected as dangerous');
+  assert.ok(dangerousCommandReason('git push --force'), 'git push --force detected');
+  assert.equal(dangerousCommandReason('ls -la'), null, 'ls is not dangerous');
+  assert.equal(dangerousCommandReason('echo hello'), null, 'echo is not dangerous');
+});
+
+test('ESC cancel sets the cancellation flag (checked between tool-call iterations)', () => {
+  const { Agent } = require('../dist/agent/Agent');
+  const { DEFAULT_CONFIG } = require('../dist/config/ConfigManager');
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  const agent = new Agent(() => cfg, () => {});
+  assert.equal(agent.isCancelled(), false, 'starts uncancelled');
+  agent.cancel();
+  assert.equal(agent.isCancelled(), true, 'cancel() sets the flag');
+});
+
+test('UI step classification maps tool calls to human-readable steps', () => {
+  const { classifyStep } = require('../dist/agent/Agent');
+  assert.equal(classifyStep('read_file', { path: 'a.ts' }), 'Reading');
+  assert.equal(classifyStep('list_dir', { path: '.' }), 'Reading');
+  assert.equal(classifyStep('write_file', { path: 'a.ts' }), 'Editing file');
+  assert.equal(classifyStep('delete_file', { path: 'a.ts' }), 'Deleting file');
+  assert.equal(classifyStep('run_shell', { command: 'npm test' }), 'Running tests');
+  assert.equal(classifyStep('run_shell', { command: 'npm run build' }), 'Building');
+  assert.equal(classifyStep('run_shell', { command: 'git push' }), 'Running (privileged/destructive)');
+  assert.equal(classifyStep('run_shell', { command: 'ls' }), 'Running command');
+});
+
+test('filesystem write_file is atomic and gated by fileWrite permission', async () => {
+  const { WriteFileTool, ReadFileTool } = require('../dist/agent/tools/FileSystemTools');
+  const target = path.join(os.tmpdir(), `axn-write-test-${Date.now()}.txt`);
+  // Without fileWrite permission → blocked.
+  let res = await WriteFileTool.execute({ path: target, content: 'hello' }, {
+    permissions: { webAccess: true, searchAccess: true, shellExec: true, fileRead: true, fileWrite: false },
+    cwd: os.tmpdir(), accessScope: 'global',
+  });
+  assert.equal(res.success, false, 'write_file blocked without fileWrite');
+  // With fileWrite + always-allow policy → writes.
+  res = await WriteFileTool.execute({ path: target, content: 'hello-atomic' }, {
+    permissions: { webAccess: true, searchAccess: true, shellExec: true, fileRead: true, fileWrite: true },
+    cwd: os.tmpdir(), accessScope: 'global', dangerousActionPolicy: 'always-allow',
+  });
+  assert.equal(res.success, true, res.output);
+  assert.match(res.output, /Created/);
+  const read = await ReadFileTool.execute({ path: target }, {
+    permissions: { webAccess: true, searchAccess: true, shellExec: true, fileRead: true, fileWrite: false },
+    cwd: os.tmpdir(), accessScope: 'global',
+  });
+  assert.match(read.output, /hello-atomic/);
+  fs.unlinkSync(target);
 });

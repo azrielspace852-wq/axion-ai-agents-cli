@@ -70,6 +70,7 @@ export class OpenAICompatProvider implements BaseProvider {
       },
       timeout: 120000,
       validateStatus: (status) => status < 500,
+      ...(opts.signal ? { signal: opts.signal } : {}),
     });
 
     if (res.status >= 400) {

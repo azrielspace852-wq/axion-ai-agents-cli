@@ -176,3 +176,15 @@ ok "AXION AI Agents CLI installed successfully."
 info "Run: axion-cli  (or: axn-cli)"
 info "Application: $APP_DIR"
 info "Configuration and user data: $HOME/.axn-cli"
+
+# --- Self-delete the installer (only when run as a regular file) ------------
+# If the user downloaded install.sh and ran it as a file, remove it after a
+# successful install. If run via `curl | bash`, $0 is stdin (not a regular
+# file) and nothing is deleted. If install failed, we never reach here (fail
+# exits earlier), so the script is preserved for diagnosis.
+if [ -f "$0" ]; then
+  info "Removing the installer script itself: $0"
+  rm -f -- "$0" || warn "Could not remove installer script: $0"
+else
+  info "Installer was read from stdin (curl | bash); no local installer file to delete."
+fi

@@ -10,10 +10,10 @@ import {
   AxionConfig,
   DEFAULT_PERMISSIONS,
   DEFAULT_MODEL_ID,
-  ProviderType,
   ThinkingLevel,
   CustomModel,
   CustomProvider,
+  DangerousActionPolicy,
 } from '../types';
 import { ensurePrivateDir, writeJsonAtomically } from '../utils/jsonFile';
 
@@ -27,8 +27,11 @@ export const DEFAULT_CONFIG: AxionConfig = {
   customModels: [],
   customProviders: [],
   thinkingLevel: 'medium',
-  systemPrompt: '',
+  systemPrompt: '',           // LEGACY field, retained for backward-compatible reads
+  customInstructions: '',     // user-provided additional instructions (base prompt is locked)
   permissions: { ...DEFAULT_PERMISSIONS },
+  dangerousActionPolicy: 'always-ask',
+  verbose: false,
   accessScope: 'workspace',
   maxToolCallsPerRequest: 30,
   maxInputTokens: undefined,
@@ -39,17 +42,14 @@ export const DEFAULT_CONFIG: AxionConfig = {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
-
 function stringValue(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback;
 }
-
 function normalizeTokenLimit(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   const n = Math.floor(value);
   return n >= 1 ? n : undefined;
 }
-
 function parseCustomModels(value: unknown): CustomModel[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is CustomModel => {
@@ -64,51 +64,59 @@ function parseCustomModels(value: unknown): CustomModel[] {
     ...(typeof item.baseUrl === 'string' && item.baseUrl.trim() ? { baseUrl: item.baseUrl.trim() } : {}),
   }));
 }
-
 function parseCustomProviders(value: unknown): CustomProvider[] {
   if (!Array.isArray(value)) return [];
-  return value.filter((item): item is CustomProvider => {
-    if (!isRecord(item)) return false;
-    return typeof item.name === 'string' && item.name.trim().length > 0 &&
-      typeof item.providerType === 'string' &&
-      (item.providerType === 'google-ai-studio' || item.providerType === 'openai-compatible') &&
-      typeof item.baseUrl === 'string' &&
-      typeof item.apiKey === 'string';
-  }).map((item) => ({
-    name: item.name.trim(),
-    providerType: item.providerType,
-    baseUrl: item.baseUrl.trim(),
-    apiKey: item.apiKey,
-  }));
+  const seen = new Set<string>();
+  const out: CustomProvider[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const id = typeof item.id === 'string' ? item.id.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-') : '';
+    if (!id || seen.has(id)) continue; // uniqueness enforced; duplicates dropped
+    seen.add(id);
+    if (typeof item.baseUrl !== 'string' || !item.baseUrl.trim()) continue;
+    out.push({
+      id,
+      name: (typeof item.name === 'string' && item.name.trim()) ? item.name.trim() : id,
+      baseUrl: item.baseUrl.trim().replace(/\/$/, ''),
+      apiKey: typeof item.apiKey === 'string' ? item.apiKey : '',
+      ...(typeof item.defaultModel === 'string' && item.defaultModel.trim() ? { defaultModel: item.defaultModel.trim() } : {}),
+    });
+  }
+  return out;
 }
 
-function parseDangerousActions(value: unknown): Record<string, 'always-allow' | 'always-ask' | 'always-deny'> {
-  if (!isRecord(value)) return {};
-  const result: Record<string, 'always-allow' | 'always-ask' | 'always-deny'> = {};
-  const validModes = ['always-allow', 'always-ask', 'always-deny'];
-  for (const [key, val] of Object.entries(value)) {
-    if (typeof val === 'string' && validModes.includes(val)) {
-      result[key] = val;
-    }
-  }
-  return result;
-}
+const BUILTIN_PROVIDERS = new Set(['google-ai-studio', 'openai-compatible']);
 
 function normalizeConfig(value: unknown, existingConfig: boolean): AxionConfig {
   const parsed = isRecord(value) ? value : {};
   const google = isRecord(parsed.google) ? parsed.google : {};
   const openai = isRecord(parsed.openaiCompatible) ? parsed.openaiCompatible : {};
   const permissions = isRecord(parsed.permissions) ? parsed.permissions : {};
-  const provider: ProviderType = parsed.activeProvider === 'openai-compatible'
-    ? 'openai-compatible'
-    : 'google-ai-studio';
+  const customProviders = parseCustomProviders(parsed.customProviders);
+  const customProviderIds = new Set(customProviders.map((p) => p.id));
+
+  // activeProvider: a built-in id OR a custom-provider id; anything else resets to default.
+  let activeProvider: string = DEFAULT_CONFIG.activeProvider;
+  if (typeof parsed.activeProvider === 'string' && parsed.activeProvider.trim()) {
+    const ap = parsed.activeProvider.trim();
+    if (BUILTIN_PROVIDERS.has(ap) || customProviderIds.has(ap)) activeProvider = ap;
+  }
+
   const levels: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
   const requestedLevel = parsed.thinkingLevel;
+  const policies: DangerousActionPolicy[] = ['always-ask', 'always-allow', 'always-deny'];
+  const requestedPolicy = parsed.dangerousActionPolicy;
+
+  // Legacy migration: systemPrompt / instructions → customInstructions.
+  const customInstructions = stringValue(
+    parsed.customInstructions,
+    stringValue(parsed.systemPrompt, stringValue(parsed.instructions, '')),
+  );
 
   return {
     version: 1,
     language: parsed.language === 'id' ? 'id' : 'en',
-    activeProvider: provider,
+    activeProvider,
     google: { apiKey: stringValue(google.apiKey, '') },
     openaiCompatible: {
       baseUrl: stringValue(openai.baseUrl, ''),
@@ -116,12 +124,17 @@ function normalizeConfig(value: unknown, existingConfig: boolean): AxionConfig {
     },
     model: stringValue(parsed.model, DEFAULT_MODEL_ID).trim() || DEFAULT_MODEL_ID,
     customModels: parseCustomModels(parsed.customModels),
-    customProviders: parseCustomProviders(parsed.customProviders),
+    customProviders,
     thinkingLevel: levels.includes(requestedLevel as ThinkingLevel)
       ? requestedLevel as ThinkingLevel
       : DEFAULT_CONFIG.thinkingLevel,
-    systemPrompt: stringValue(parsed.systemPrompt, stringValue(parsed.instructions, '')),
+    systemPrompt: '', // legacy field always normalized empty
+    customInstructions,
     accessScope: parsed.accessScope === 'global' ? 'global' : 'workspace',
+    dangerousActionPolicy: policies.includes(requestedPolicy as DangerousActionPolicy)
+      ? (requestedPolicy as DangerousActionPolicy)
+      : DEFAULT_CONFIG.dangerousActionPolicy,
+    verbose: typeof parsed.verbose === 'boolean' ? parsed.verbose : DEFAULT_CONFIG.verbose,
     maxToolCallsPerRequest: Number.isInteger(parsed.maxToolCallsPerRequest)
       ? Math.min(100, Math.max(1, Number(parsed.maxToolCallsPerRequest)))
       : DEFAULT_CONFIG.maxToolCallsPerRequest,
@@ -137,25 +150,21 @@ function normalizeConfig(value: unknown, existingConfig: boolean): AxionConfig {
       shellExec: typeof permissions.shellExec === 'boolean' ? permissions.shellExec : DEFAULT_PERMISSIONS.shellExec,
       fileRead: typeof permissions.fileRead === 'boolean' ? permissions.fileRead : DEFAULT_PERMISSIONS.fileRead,
       fileWrite: typeof permissions.fileWrite === 'boolean' ? permissions.fileWrite : DEFAULT_PERMISSIONS.fileWrite,
-      dangerousActions: parseDangerousActions(permissions.dangerousActions),
     },
   };
 }
 
 export class ConfigManager {
   private config: AxionConfig;
-
   constructor() {
     this.ensureDirs();
     this.config = this.load();
   }
-
   private ensureDirs(): void {
     for (const dir of [AXN_DIR, MEMORY_DIR, CONVERSATIONS_DIR, INSTRUCTIONS_DIR]) {
       ensurePrivateDir(dir);
     }
   }
-
   private load(): AxionConfig {
     if (!fs.existsSync(CONFIG_PATH)) return normalizeConfig(DEFAULT_CONFIG, false);
     try {
@@ -173,111 +182,18 @@ export class ConfigManager {
       return normalizeConfig(DEFAULT_CONFIG, true);
     }
   }
-
   get(): AxionConfig {
     return this.config;
   }
-
   needsOnboarding(): boolean {
     return !this.config.hasCompletedOnboarding;
   }
-
   save(): void {
     this.ensureDirs();
     writeJsonAtomically(CONFIG_PATH, this.config);
   }
-
   update(patch: Partial<AxionConfig>): void {
     this.config = normalizeConfig({ ...this.config, ...patch }, true);
-    this.save();
-  }
-
-  // Custom Provider management
-  getCustomProviders(): CustomProvider[] {
-    return this.config.customProviders;
-  }
-
-  addCustomProvider(provider: CustomProvider): { success: boolean; error?: string } {
-    // Check for duplicate name
-    if (this.config.customProviders.some(p => p.name === provider.name)) {
-      return { success: false, error: 'Nama provider sudah digunakan. Gunakan nama yang unik.' };
-    }
-    // Validate provider
-    if (!provider.name.trim()) {
-      return { success: false, error: 'Nama provider tidak boleh kosong.' };
-    }
-    if (provider.providerType === 'openai-compatible' && !provider.baseUrl.trim()) {
-      return { success: false, error: 'Base URL diperlukan untuk provider OpenAI-compatible.' };
-    }
-    if (!provider.apiKey.trim()) {
-      return { success: false, error: 'API Key tidak boleh kosong.' };
-    }
-    // Validate URL format for openai-compatible
-    if (provider.providerType === 'openai-compatible') {
-      try {
-        const url = new URL(provider.baseUrl);
-        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-          return { success: false, error: 'Base URL harus menggunakan protokol HTTP atau HTTPS.' };
-        }
-        if (url.username || url.password) {
-          return { success: false, error: 'Base URL tidak boleh mengandung kredensial.' };
-        }
-      } catch {
-        return { success: false, error: 'Format Base URL tidak valid.' };
-      }
-    }
-    this.config.customProviders.push(provider);
-    this.save();
-    return { success: true };
-  }
-
-  removeCustomProvider(name: string): boolean {
-    const index = this.config.customProviders.findIndex(p => p.name === name);
-    if (index === -1) return false;
-    this.config.customProviders.splice(index, 1);
-    // If the removed provider was active, switch to default
-    if (this.config.activeProvider === 'openai-compatible') {
-      const activeProvider = this.config.customProviders.find(p => p.providerType === 'openai-compatible');
-      if (!activeProvider) {
-        this.config.activeProvider = 'google-ai-studio';
-      }
-    }
-    this.save();
-    return true;
-  }
-
-  getCustomProvider(name: string): CustomProvider | undefined {
-    return this.config.customProviders.find(p => p.name === name);
-  }
-
-  setActiveCustomProvider(name: string): { success: boolean; error?: string } {
-    const provider = this.config.customProviders.find(p => p.name === name);
-    if (!provider) {
-      return { success: false, error: 'Provider tidak ditemukan.' };
-    }
-    if (provider.providerType === 'openai-compatible') {
-      this.config.activeProvider = 'openai-compatible';
-      this.config.openaiCompatible = { baseUrl: provider.baseUrl, apiKey: provider.apiKey };
-    } else {
-      this.config.activeProvider = 'google-ai-studio';
-      this.config.google = { apiKey: provider.apiKey };
-    }
-    this.save();
-    return { success: true };
-  }
-
-  // Dangerous action permissions
-  getDangerousActionPermission(action: string): 'always-allow' | 'always-ask' | 'always-deny' {
-    return this.config.permissions.dangerousActions[action] || 'always-ask';
-  }
-
-  setDangerousActionPermission(action: string, mode: 'always-allow' | 'always-ask' | 'always-deny'): void {
-    this.config.permissions.dangerousActions[action] = mode;
-    this.save();
-  }
-
-  removeDangerousActionPermission(action: string): void {
-    delete this.config.permissions.dangerousActions[action];
     this.save();
   }
 }

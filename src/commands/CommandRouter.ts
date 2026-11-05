@@ -4,9 +4,10 @@ import { t } from '../i18n';
 
 // Canonical command list used by /help and the inline suggestion popup.
 export const COMMAND_LIST: string[] = [
-  '/help', '/exit', '/models', '/thinking', '/system', '/memory', '/api-key',
-  '/permissions', '/tool-limit', '/max-tool-call', '/max-token', '/privacy-policy',
-  '/provider', '/clear', '/conversation', '/language', '/feedback', '/access', '/acces',
+  '/help', '/exit', '/models', '/thinking', '/system', '/system-prompt', '/instructions',
+  '/memory', '/api-key', '/permissions', '/tool-limit', '/max-tool-call', '/max-token',
+  '/privacy-policy', '/provider', '/clear', '/conversation', '/language', '/feedback',
+  '/access', '/acces', '/verbose',
 ];
 
 export class CommandRouter {
@@ -35,10 +36,13 @@ export class CommandRouter {
         return (await H.handleModels(ctx)) || {};
       case 'thinking':
         return (await H.handleThinking(ctx)) || {};
+      case 'instructions':
+        return (await H.handleInstructions(ctx)) || {};
       case 'system':
       case 'system-prompt':
-      case 'instructions':
-        return (await H.handleSystemPrompt(ctx)) || {};
+        return (await H.handleViewSystemPrompt(ctx)) || {};
+      case 'verbose':
+        return (await H.handleVerbose(ctx)) || {};
       case 'memory':
         return (await H.handleMemory(ctx)) || {};
       case 'api-key':

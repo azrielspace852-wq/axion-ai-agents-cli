@@ -56,6 +56,8 @@ export class REPL implements ReplLike {
     readline.emitKeypressEvents(process.stdin);
     this.rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
     this.rl.setPrompt(this.basePrompt);
+    // Wire explicit Yes/No confirmation (used for dangerous actions) and ESC-cancel.
+    this.agent.setConfirm((q) => this.confirm(q));
 
     // Suppress echo hook (used by secret input and during select menus).
     const internalRl = this.rl as unknown as { _writeToOutput?: (text: string) => void };
@@ -141,6 +143,14 @@ export class REPL implements ReplLike {
     const systemPrompt = this.agent.buildSystemPrompt(memoryText);
     const generatedStart = this.history.length;
     this.startThinking();
+    // ESC-cancel: while the agent is working, pressing Escape requests cancellation.
+    const onEsc = (_str: string, key?: { name?: string }) => {
+      if (key?.name === 'escape') {
+        this.print(chalk.yellow('\n(cancel requested — stopping safely…)'));
+        this.agent.cancel();
+      }
+    };
+    process.stdin.on('keypress', onEsc);
     try {
       const reply = await this.agent.chat(this.history, systemPrompt);
       this.stopThinking();
@@ -150,6 +160,7 @@ export class REPL implements ReplLike {
       const message = error instanceof Error ? error.message : String(error);
       this.print(chalk.red('Error: ') + message);
     } finally {
+      process.stdin.removeListener('keypress', onEsc);
       this.stopThinking();
       for (const message of this.history.slice(generatedStart)) {
         this.bufferMessage(message.role, message.content, message);
@@ -245,6 +256,12 @@ export class REPL implements ReplLike {
     // Discard anything typed while a menu/secret prompt was active.
     (this.rl as unknown as { line: string }).line = '';
     (this.rl as unknown as { cursor: number }).cursor = 0;
+  }
+
+  // Explicit Yes/No confirmation (used by dangerous-action policy).
+  async confirm(question: string): Promise<boolean> {
+    const choice = await this.select(`${question}`, ['Yes, allow', 'No, block']);
+    return choice === 0;
   }
 
   select(prompt: string, options: string[]): Promise<number | null> {

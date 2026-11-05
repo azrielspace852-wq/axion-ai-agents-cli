@@ -8,6 +8,7 @@ export interface ReplLike {
   question(q: string): Promise<string>;
   questionSecret(q: string): Promise<string>;
   select(prompt: string, options: string[]): Promise<number | null>;
+  confirm(question: string): Promise<boolean>; // Yes/No explicit confirmation for dangerous actions
   clearScreen(): void;
   exit(code?: number): void;
   resetContext(): void;

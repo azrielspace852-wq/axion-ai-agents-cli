@@ -6,6 +6,7 @@ import {
   ProviderType,
   ThinkingLevel,
   PermissionSettings,
+  maskApiKey,
 } from '../types';
 import { t, setLanguage } from '../i18n';
 
@@ -139,15 +140,32 @@ export async function handleThinking(ctx: CommandContext): Promise<HandlerResult
   ctx.repl.print(`Thinking set to ${levels[selected]}.`);
 }
 
-export async function handleSystemPrompt(ctx: CommandContext): Promise<HandlerResult | void> {
-  ctx.repl.print(chalk.bold('Current system prompt addition:'));
-  ctx.repl.print(ctx.config.systemPrompt || chalk.dim('(none)'));
-  ctx.repl.print(chalk.dim('The AXION base system prompt remains active; this text is appended to it.'));
-  const answer = (await ctx.repl.question('New system prompt ("clear" to remove, Enter to keep): ')).trim();
+// /system-prompt: view the LOCKED base system prompt + current custom instructions (read-only).
+export async function handleViewSystemPrompt(ctx: CommandContext): Promise<HandlerResult | void> {
+  ctx.repl.print(chalk.bold('Base system prompt (LOCKED — cannot be edited by the user)'));
+  ctx.repl.print(chalk.dim('Core rules: anti-hallucination, workspace awareness, execution transparency, no secrets in output. Custom instructions below are appended and can never override these core rules.'));
+  ctx.repl.print('');
+  ctx.repl.print(chalk.bold('Current custom instructions (edit with /instructions):'));
+  ctx.repl.print(ctx.config.customInstructions || chalk.dim('(none)'));
+  ctx.repl.print(chalk.dim('Use /instructions to set or clear custom instructions.'));
+}
+
+// /instructions: edit user-provided custom instructions (appended to the locked base prompt).
+export async function handleInstructions(ctx: CommandContext): Promise<HandlerResult | void> {
+  ctx.repl.print(chalk.bold('Current custom instructions:'));
+  ctx.repl.print(ctx.config.customInstructions || chalk.dim('(none)'));
+  ctx.repl.print(chalk.dim('These are appended to the locked base system prompt. If they conflict with core rules, core rules win.'));
+  const answer = (await ctx.repl.question('New custom instructions ("clear" to remove, Enter to keep): ')).trim();
   if (!answer) return;
-  ctx.config.systemPrompt = answer.toLowerCase() === 'clear' ? '' : answer;
+  ctx.config.customInstructions = answer.toLowerCase() === 'clear' ? '' : answer;
   ctx.saveConfig();
-  ctx.repl.print('System prompt updated.');
+  ctx.repl.print('Custom instructions updated.');
+}
+
+export async function handleVerbose(ctx: CommandContext): Promise<HandlerResult | void> {
+  ctx.config.verbose = !ctx.config.verbose;
+  ctx.saveConfig();
+  ctx.repl.print(`Verbose output: ${ctx.config.verbose ? 'ON (full tool output / diffs)' : 'OFF (summaries only, default)'}`);
 }
 
 export async function handleMemory(ctx: CommandContext): Promise<HandlerResult | void> {
@@ -218,13 +236,37 @@ export async function handleApiKey(ctx: CommandContext): Promise<HandlerResult |
 }
 
 export async function handlePermissions(ctx: CommandContext): Promise<HandlerResult | void> {
-  const keys: (keyof PermissionSettings)[] = ['webAccess', 'searchAccess', 'shellExec'];
+  const keys: (keyof PermissionSettings)[] = ['webAccess', 'searchAccess', 'shellExec', 'fileRead', 'fileWrite'];
   for (;;) {
-    const options = keys.map((key) => `${key}: ${ctx.config.permissions[key] ? 'ON' : 'OFF'}`);
-    const selected = await choose(ctx, 'Toggle permission (Enter/Escape to finish)', [...options, 'Save and exit']);
-    if (selected === null || selected === keys.length) break;
-    const key = keys[selected];
-    ctx.config.permissions[key] = !ctx.config.permissions[key];
+    const policyLabel = ctx.config.dangerousActionPolicy;
+    const options = [
+      ...keys.map((key) => `${key}: ${ctx.config.permissions[key] ? 'ON' : 'OFF'}`),
+      `Dangerous action policy: ${policyLabel}`,
+      `Verbose output: ${ctx.config.verbose ? 'ON' : 'OFF'}`,
+      'Save and exit',
+    ];
+    const selected = await choose(ctx, 'Toggle permissions / policy (Enter/Escape to finish)', options);
+    if (selected === null || selected === options.length - 1) break;
+    if (selected < keys.length) {
+      const key = keys[selected];
+      ctx.config.permissions[key] = !ctx.config.permissions[key];
+      continue;
+    }
+    if (selected === keys.length) {
+      const p = await choose(ctx, 'Dangerous action policy (rm -rf, git push, sudo, file overwrite/delete)', [
+        'always-ask — confirm every dangerous action (default)',
+        'always-allow — never ask (use with caution)',
+        'always-deny — block all dangerous actions',
+        'Cancel',
+      ]);
+      if (p === 0) ctx.config.dangerousActionPolicy = 'always-ask';
+      else if (p === 1) ctx.config.dangerousActionPolicy = 'always-allow';
+      else if (p === 2) ctx.config.dangerousActionPolicy = 'always-deny';
+      continue;
+    }
+    if (selected === keys.length + 1) {
+      ctx.config.verbose = !ctx.config.verbose;
+    }
   }
   ctx.saveConfig();
 }
@@ -256,21 +298,99 @@ export async function handleToolLimit(ctx: CommandContext): Promise<HandlerResul
 }
 
 export async function handleProvider(ctx: CommandContext): Promise<HandlerResult | void> {
-  const selected = await choose(ctx, `Active provider: ${ctx.config.activeProvider}`, ['Google AI Studio', 'OpenAI-compatible', 'Cancel']);
-  if (selected === null || selected === 2) return;
-  if (selected === 0) {
-    ctx.config.activeProvider = 'google-ai-studio';
-    ctx.saveConfig();
-    return ctx.repl.print('Provider set to Google AI Studio.');
+  const cfg = ctx.config;
+  for (;;) {
+    const custom = cfg.customProviders || [];
+    const options = [
+      'Google AI Studio',
+      'OpenAI-compatible (built-in)',
+      ...custom.map((p) => `Custom: ${p.name} (${p.id})${cfg.activeProvider === p.id ? ' [active]' : ''}`),
+      'Add custom provider…',
+      ...(custom.length ? ['Edit custom provider…', 'Delete custom provider…'] : []),
+      'Save and exit',
+    ];
+    const selected = await choose(ctx, `Active provider: ${cfg.activeProvider}`, options);
+    if (selected === null || selected === options.length - 1) break;
+    if (selected === 0) {
+      cfg.activeProvider = 'google-ai-studio';
+      ctx.saveConfig();
+      ctx.repl.print('Provider set to Google AI Studio.');
+      continue;
+    }
+    if (selected === 1) {
+      const baseUrl = (await ctx.repl.question('Base URL (e.g. https://api.openai.com/v1): ')).trim();
+      if (!validHttpUrl(baseUrl)) { ctx.repl.print('Invalid base URL.'); continue; }
+      const apiKey = (await ctx.repl.questionSecret('API Key: ')).trim();
+      if (!apiKey) { ctx.repl.print('Cancelled — empty API key.'); continue; }
+      cfg.openaiCompatible = { baseUrl: baseUrl.replace(/\/$/, ''), apiKey };
+      cfg.activeProvider = 'openai-compatible';
+      ctx.saveConfig();
+      ctx.repl.print('Provider set to OpenAI-compatible.');
+      continue;
+    }
+    const addIdx = 2 + custom.length;
+    if (selected === addIdx) {
+      // Add custom provider
+      const idRaw = (await ctx.repl.question('Provider id (short slug, e.g. my-openai): ')).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+      if (!idRaw) { ctx.repl.print('Cancelled — empty id.'); continue; }
+      if (custom.some((p) => p.id === idRaw) || idRaw === 'google-ai-studio' || idRaw === 'openai-compatible') {
+        ctx.repl.print(`Duplicate id "${idRaw}" — provider ids must be unique.`);
+        continue;
+      }
+      const name = (await ctx.repl.question('Display name: ')).trim() || idRaw;
+      const baseUrl = (await ctx.repl.question('Base URL (OpenAI-compatible /v1): ')).trim();
+      if (!validHttpUrl(baseUrl)) { ctx.repl.print('Invalid base URL.'); continue; }
+      const apiKey = (await ctx.repl.questionSecret('API Key (stored in config.json, mode 0600): ')).trim();
+      if (!apiKey) { ctx.repl.print('Cancelled — empty API key.'); continue; }
+      const defaultModel = (await ctx.repl.question('Default model (optional, Enter to skip): ')).trim();
+      cfg.customProviders = [...custom, { id: idRaw, name, baseUrl: baseUrl.replace(/\/$/, ''), apiKey, ...(defaultModel ? { defaultModel } : {}) }];
+      cfg.activeProvider = idRaw;
+      if (defaultModel) cfg.model = defaultModel;
+      ctx.saveConfig();
+      ctx.repl.print(`Custom provider "${name}" (${idRaw}) added and selected. Key stored masked: ${maskApiKey(apiKey)}`);
+      continue;
+    }
+    const editIdx = addIdx + 1;
+    if (custom.length && selected === editIdx) {
+      const pick = await choose(ctx, 'Edit which custom provider?', [...custom.map((p) => p.name), 'Cancel']);
+      if (pick === null || pick === custom.length) continue;
+      const p = custom[pick];
+      const name = (await ctx.repl.question(`Display name (current: ${p.name}, Enter to keep): `)).trim() || p.name;
+      const baseUrl = (await ctx.repl.question(`Base URL (current: ${p.baseUrl}, Enter to keep): `)).trim() || p.baseUrl;
+      if (!validHttpUrl(baseUrl)) { ctx.repl.print('Invalid base URL.'); continue; }
+      const apiKeyRaw = (await ctx.repl.questionSecret(`API Key (Enter to keep ${maskApiKey(p.apiKey)}): `)).trim();
+      const apiKey = apiKeyRaw || p.apiKey;
+      const defaultModel = (await ctx.repl.question(`Default model (current: ${p.defaultModel || '(none)'}, Enter to keep): `)).trim();
+      cfg.customProviders = custom.map((x) => x.id === p.id
+        ? { ...x, name, baseUrl: baseUrl.replace(/\/$/, ''), apiKey, ...(defaultModel ? { defaultModel } : (x.defaultModel ? { defaultModel: x.defaultModel } : {})) }
+        : x);
+      ctx.saveConfig();
+      ctx.repl.print(`Custom provider "${p.id}" updated.`);
+      continue;
+    }
+    const delIdx = editIdx + 1;
+    if (custom.length && selected === delIdx) {
+      const pick = await choose(ctx, 'Delete which custom provider?', [...custom.map((p) => p.name), 'Cancel']);
+      if (pick === null || pick === custom.length) continue;
+      const p = custom[pick];
+      const confirm = await choose(ctx, `Delete custom provider "${p.name}"? This removes its stored API key.`, ['Delete', 'Cancel']);
+      if (confirm !== 0) continue;
+      cfg.customProviders = custom.filter((x) => x.id !== p.id);
+      if (cfg.activeProvider === p.id) cfg.activeProvider = 'google-ai-studio';
+      ctx.saveConfig();
+      ctx.repl.print(`Custom provider "${p.id}" deleted.`);
+      continue;
+    }
+    // Otherwise: selecting a custom provider (indices 2 .. 2+custom.length-1)
+    const customIdx = selected - 2;
+    if (customIdx >= 0 && customIdx < custom.length) {
+      const p = custom[customIdx];
+      cfg.activeProvider = p.id;
+      if (p.defaultModel) cfg.model = p.defaultModel;
+      ctx.saveConfig();
+      ctx.repl.print(`Provider set to custom: ${p.name} (${p.id}). Key: ${maskApiKey(p.apiKey)}`);
+    }
   }
-  const baseUrl = (await ctx.repl.question('Base URL (e.g. https://api.openai.com/v1): ')).trim();
-  if (!validHttpUrl(baseUrl)) return ctx.repl.print('Invalid base URL. Use an absolute HTTP/HTTPS URL without credentials.');
-  const apiKey = (await ctx.repl.questionSecret('API Key: ')).trim();
-  if (!apiKey) return ctx.repl.print('Provider switch cancelled because the API key was empty.');
-  ctx.config.openaiCompatible = { baseUrl: baseUrl.replace(/\/$/, ''), apiKey };
-  ctx.config.activeProvider = 'openai-compatible';
-  ctx.saveConfig();
-  ctx.repl.print('Provider set to OpenAI-compatible.');
 }
 
 export async function handleClear(ctx: CommandContext): Promise<HandlerResult | void> {
@@ -325,7 +445,10 @@ export async function handleHelp(ctx: CommandContext): Promise<HandlerResult | v
     ['/acces', 'Choose workspace-only or global access scope'],
     ['/models', 'Select, add, edit, or delete custom models'],
     ['/thinking', t('help.thinking')],
-    ['/system', 'View or edit the additional system prompt'],
+    ['/system', 'View the locked base system prompt (read-only)'],
+    ['/system-prompt', 'View the locked base system prompt + current custom instructions'],
+    ['/instructions', 'Set or clear your custom instructions (appended to base prompt)'],
+    ['/verbose', 'Toggle verbose output (full tool output vs summaries)'],
     ['/memory', t('help.memory')],
     ['/api-key', t('help.apikey')],
     ['/permissions', t('help.permissions')],

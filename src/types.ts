@@ -47,6 +47,10 @@ export interface ToolExecutionContext {
   cwd: string;
   accessScope: AccessScope;
   notice?: (msg: string) => void;
+  confirm?: (question: string) => Promise<boolean>; // explicit Yes/No confirmation for dangerous actions
+  abortSignal?: AbortSignal;                         // cancellation (ESC)
+  dangerousActionPolicy?: DangerousActionPolicy;
+  verbose?: boolean;
 }
 
 export interface ToolResult {
@@ -61,19 +65,23 @@ export interface AgentTool {
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 
-export type DangerousActionMode = 'always-allow' | 'always-ask' | 'always-deny';
-
 export interface PermissionSettings {
   webAccess: boolean;
   searchAccess: boolean;
   shellExec: boolean;
   fileRead: boolean;
   fileWrite: boolean;
-  // Per-action dangerous command permissions
-  dangerousActions: Record<string, DangerousActionMode>;
 }
 
 export type ProviderType = 'google-ai-studio' | 'openai-compatible';
+export interface CustomProvider {
+  id: string;            // unique slug; used as the activeProvider value when selected
+  name: string;          // user-facing display name
+  baseUrl: string;       // OpenAI-compatible chat completions endpoint base
+  apiKey: string;
+  defaultModel?: string; // optional model selected by default when this provider is active
+}
+export type DangerousActionPolicy = 'always-ask' | 'always-allow' | 'always-deny';
 
 export interface CustomModel {
   id: string;      // model basename/model ID sent to the provider
@@ -82,25 +90,21 @@ export interface CustomModel {
   baseUrl?: string; // optional per-model OpenAI-compatible endpoint
 }
 
-export interface CustomProvider {
-  name: string;           // unique user-defined name
-  providerType: ProviderType;
-  baseUrl: string;        // for openai-compatible
-  apiKey: string;         // encrypted or plain (stored with restrictive perms)
-}
-
 export interface AxionConfig {
   version: 1;
   language: 'en' | 'id';
-  activeProvider: ProviderType;
+  activeProvider: string;            // ProviderType or a CustomProvider.id
   google: { apiKey: string };
   openaiCompatible: { baseUrl: string; apiKey: string };
   model: string;                 // currently selected model id
   customModels: CustomModel[];
-  customProviders: CustomProvider[]; // multiple custom providers
+  customProviders: CustomProvider[];
   thinkingLevel: ThinkingLevel;
-  systemPrompt: string;          // explicit system prompt (legacy instructions is migrated)
+  systemPrompt: string;          // LEGACY: migrated to customInstructions on load
+  customInstructions: string;    // user-provided additional instructions (base system prompt is locked)
   permissions: PermissionSettings;
+  dangerousActionPolicy: DangerousActionPolicy;
+  verbose: boolean;              // when false, tool/file changes are summarized (not raw content)
   accessScope: AccessScope;
   maxToolCallsPerRequest: number;
   maxInputTokens?: number;   // optional soft cap on input context (estimated as chars/4; oldest non-system messages trimmed first)
@@ -116,6 +120,14 @@ export interface ProviderChatOptions {
   thinkingLevel?: ThinkingLevel;
   temperature?: number;
   maxOutputTokens?: number;
+  signal?: AbortSignal;
+}
+
+// Mask an API key for display: keep only the last 4 characters.
+export function maskApiKey(key: string): string {
+  const k = key || '';
+  if (k.length <= 4) return '****';
+  return `****${k.slice(-4)}`;
 }
 
 export interface ProviderChatResult {
@@ -143,7 +155,6 @@ export const DEFAULT_PERMISSIONS: PermissionSettings = {
   shellExec: true, // owner requested shell execution enabled by default
   fileRead: true,
   fileWrite: false,
-  dangerousActions: {},
 };
 
 export const THINKING_BUDGET: Record<Exclude<ThinkingLevel, 'off'>, number> = {
@@ -158,29 +169,3 @@ export const USER_AGENT =
 
 export const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
-
-// Known dangerous commands that require permission checks
-export const DANGEROUS_COMMANDS = [
-  'rm -rf',
-  'git push',
-  'git push --force',
-  'git push -f',
-  'dd',
-  'mkfs',
-  'fdisk',
-  'shutdown',
-  'reboot',
-  'halt',
-  'poweroff',
-  'chmod 777',
-  'chown -R',
-  'sudo',
-  'su',
-  'curl | bash',
-  'wget | bash',
-  'npm publish',
-  'docker rmi',
-  'docker system prune',
-  'kubectl delete',
-  'terraform destroy',
-];
