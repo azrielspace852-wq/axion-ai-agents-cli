@@ -8,19 +8,19 @@ A terminal-based AI agent by **AXION Neuralis**. AXION provides an interactive c
 
 > AXION is an API-backed CLI application. You must provide credentials for the selected model provider before chatting.
 
-## Build compatibility (1.0.2)
+## Release notes (1.1.0)
 
-Version 1.0.2 fixes a TypeScript build error (`TS7016`) involving the `uuid` package. UUID v4 identifiers are now generated with Node.js' built-in `crypto.randomUUID()` API, so the project no longer needs the external `uuid` package or separate UUID type declarations. This is compatible with the project's Node.js 18.17.0 minimum requirement.
+Version 1.1.0 adds the requested CLI UX and agent controls: feedback contacts, workspace/global access policy, arrow-key menus, first-run help, animated thinking indicator, bottom-anchored rounded input frame, editable memory, custom-model management, an explicit system prompt, task-planning guidance, and a configurable per-request tool-call limit (default 30). It retains the 1.0.2 build fix based on Node.js `crypto.randomUUID()`.
 
 ## Features
 
-- **Interactive terminal REPL** with slash commands and English/Indonesian interface text.
+- **Full-screen terminal REPL** with a bottom-anchored rounded input area, animated thinking indicator, arrow-key navigation, and English/Indonesian interface text. First launch displays the command help automatically.
 - **Google AI Studio / Gemini API** provider using the Gemini `generateContent` endpoint.
 - **OpenAI-compatible** chat-completions provider for compatible API services.
 - **Tool calling** through a controlled registry: web search, page extraction, and optional local shell execution.
 - **Conversation storage** with open, delete, and JSON backup operations.
-- **Local long-term memory** that can be added, summarized, listed, and removed.
-- **Permission controls**. Shell execution is disabled by default.
+- **Local long-term memory** that can be added, summarized, listed, edited, renamed, and removed.
+- **Permission and access-scope controls**. Shell execution is enabled by default for fresh configurations; the agent can be set to workspace-policy or global scope.
 - Designed for **Termux and Unix-like environments** with Node.js 18.17 or newer.
 
 ## Requirements
@@ -86,16 +86,21 @@ To select another provider, use `/provider`. For an OpenAI-compatible provider, 
 
 ## Commands
 
+At the first interactive launch, AXION automatically prints the help reference. In interactive terminals the app switches to the alternate full-screen buffer; set `AXION_NO_ALT_SCREEN=1` to disable that behavior. The input panel is anchored to the terminal bottom. On Termux, it follows the terminal viewport size and therefore stays at the bottom edge of the area above the on-screen keyboard when the terminal resizes.
+
 | Command | Description |
 |---|---|
 | `/help` | Show available commands. |
-| `/models` | List and select built-in models or add a custom model ID. |
+| `/models` | Select built-in models; add, edit, or delete custom models. Built-in models cannot be deleted. |
 | `/provider` | Switch between Google AI Studio and OpenAI-compatible providers. |
 | `/api-key` | Set or update the active provider's API key. |
 | `/thinking` | Configure the requested reasoning level. Actual support depends on the selected model. |
-| `/instructions` | Set or clear custom system instructions. |
-| `/memory` | List, add, delete, or clear long-term memory. |
+| `/system` | View or edit the additional system prompt (legacy `/instructions` remains an alias). |
+| `/memory` | List, add, edit entries, rename topics, delete entries/topics, or clear memory. |
 | `/permissions` | Enable or disable agent tools and local access permissions. |
+| `/acces` | Choose workspace-only or global agent access policy (`/access` is an alias). |
+| `/tool-limit` | Set the maximum number of tool calls per request (default 30; allowed range 1–100). |
+| `/feedback` | Show AXION support email addresses and the GitHub issue tracker. |
 | `/conversation` | Open, delete, back up, or create a conversation. |
 | `/language` | Switch the interface language between English and Indonesian. |
 | `/clear` | Clear the screen and current in-memory chat context. Saved history remains on disk. |
@@ -109,7 +114,9 @@ To select another provider, use `/provider`. For an OpenAI-compatible provider, 
 | `web_scrape` | Retrieve readable text from an HTTP(S) web page. | `webAccess` |
 | `run_shell` | Run a command in the local operating-system shell. | `shellExec` |
 
-`run_shell` is **disabled by default**. Enabling it allows the agent to execute commands with the permissions of the current operating-system user. Only enable it when you understand and accept that risk. Web search and page retrieval also send requests to external services and websites.
+`run_shell` is **enabled by default on fresh configurations**, as requested. It executes commands with the permissions of the current operating-system user. Review generated commands carefully and disable `shellExec` with `/permissions` if you do not want local command execution. Existing configurations that explicitly saved `shellExec: false` keep that choice.
+
+The `/acces` command controls the agent policy and the shell tool working-directory restriction. Workspace scope checks the requested shell working directory, but it is **not an OS-level sandbox**: arbitrary shell commands can still access paths available to the current OS user. Do not treat workspace scope as a security boundary. Global scope tells the agent that broader filesystem operations are allowed when otherwise permitted.
 
 General-purpose file read/write tools are not implemented in this release and are not exposed as active permission toggles.
 
@@ -124,7 +131,7 @@ The built-in Google model list includes the following model IDs:
 - `gemini-3.5-flash-lite`
 - `gemini-3.1-flash-lite`
 
-Model availability and capabilities can vary by account, API access, lifecycle status, and provider. The model list is a convenience list, not a guarantee that every model is enabled for every API key. Custom model IDs can be added with `/models`.
+Model availability and capabilities can vary by account, API access, lifecycle status, and provider. The model list is a convenience list, not a guarantee that every model is enabled for every API key. Custom models can be added, edited, or deleted with `/models`; deletion is limited to user-defined models. Each custom model supports a display name, provider model basename, provider, and optional model-specific OpenAI-compatible base URL.
 
 For Gemini 3 models, AXION sends the documented `thinkingLevel` field when a reasoning level is selected and omits sampling parameters so the provider defaults are used. Gemma 4 has a binary thinking switch: `off` maps to `MINIMAL` and any enabled level maps to `HIGH`. Gemini 2.5 uses `thinkingBudget`. The `off` option sets a zero budget for Gemini 2.5 Flash / Flash-Lite; Gemini 2.5 Pro and Gemini 3 do not expose a full thinking-off setting through this API, so `off` leaves the provider default in effect for those models. OpenAI-compatible providers may ignore the thinking setting.
 
@@ -151,7 +158,7 @@ npm run build
 npm test
 ```
 
-`npm test` builds the TypeScript project and runs the local Node.js test suite. The tests do not call model APIs or external search services. To validate an actual model request, configure a valid API key and test from an environment with network access.
+`npm test` builds the TypeScript project and runs the local Node.js test suite. The tool-call limit defaults to 30 per user request and can be adjusted with `/tool-limit`. The system prompt includes an initial workspace inventory and anti-hallucination, verification, execution-transparency, and task-checklist guidance. For complex requests, AXION is instructed to create and maintain a task checklist. The tests do not call model APIs or external search services. To validate an actual model request, configure a valid API key and test from an environment with network access.
 
 ## Troubleshooting
 

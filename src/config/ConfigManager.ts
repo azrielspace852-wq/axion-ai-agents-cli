@@ -25,8 +25,11 @@ export const DEFAULT_CONFIG: AxionConfig = {
   model: DEFAULT_MODEL_ID,
   customModels: [],
   thinkingLevel: 'medium',
-  instructions: '',
+  systemPrompt: '',
   permissions: { ...DEFAULT_PERMISSIONS },
+  accessScope: 'workspace',
+  maxToolCallsPerRequest: 30,
+  hasCompletedOnboarding: false,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -48,10 +51,11 @@ function parseCustomModels(value: unknown): CustomModel[] {
     id: item.id.trim(),
     label: item.label.trim() || item.id.trim(),
     provider: item.provider,
+    ...(typeof item.baseUrl === 'string' && item.baseUrl.trim() ? { baseUrl: item.baseUrl.trim() } : {}),
   }));
 }
 
-function normalizeConfig(value: unknown): AxionConfig {
+function normalizeConfig(value: unknown, existingConfig: boolean): AxionConfig {
   const parsed = isRecord(value) ? value : {};
   const google = isRecord(parsed.google) ? parsed.google : {};
   const openai = isRecord(parsed.openaiCompatible) ? parsed.openaiCompatible : {};
@@ -76,7 +80,15 @@ function normalizeConfig(value: unknown): AxionConfig {
     thinkingLevel: levels.includes(requestedLevel as ThinkingLevel)
       ? requestedLevel as ThinkingLevel
       : DEFAULT_CONFIG.thinkingLevel,
-    instructions: stringValue(parsed.instructions, ''),
+    systemPrompt: stringValue(parsed.systemPrompt, stringValue(parsed.instructions, '')),
+    accessScope: parsed.accessScope === 'global' ? 'global' : 'workspace',
+    maxToolCallsPerRequest: Number.isInteger(parsed.maxToolCallsPerRequest)
+      ? Math.min(100, Math.max(1, Number(parsed.maxToolCallsPerRequest)))
+      : DEFAULT_CONFIG.maxToolCallsPerRequest,
+    // Existing installations are treated as already onboarded; only a fresh config sees first-run help.
+    hasCompletedOnboarding: typeof parsed.hasCompletedOnboarding === 'boolean'
+      ? parsed.hasCompletedOnboarding
+      : existingConfig,
     permissions: {
       webAccess: typeof permissions.webAccess === 'boolean' ? permissions.webAccess : DEFAULT_PERMISSIONS.webAccess,
       searchAccess: typeof permissions.searchAccess === 'boolean' ? permissions.searchAccess : DEFAULT_PERMISSIONS.searchAccess,
@@ -102,10 +114,10 @@ export class ConfigManager {
   }
 
   private load(): AxionConfig {
-    if (!fs.existsSync(CONFIG_PATH)) return normalizeConfig(DEFAULT_CONFIG);
+    if (!fs.existsSync(CONFIG_PATH)) return normalizeConfig(DEFAULT_CONFIG, false);
     try {
       const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-      return normalizeConfig(JSON.parse(raw) as unknown);
+      return normalizeConfig(JSON.parse(raw) as unknown, true);
     } catch {
       // Preserve a damaged file for diagnosis before falling back to safe defaults.
       try {
@@ -115,12 +127,16 @@ export class ConfigManager {
       } catch {
         // The fallback configuration remains usable even if a backup cannot be made.
       }
-      return normalizeConfig(DEFAULT_CONFIG);
+      return normalizeConfig(DEFAULT_CONFIG, true);
     }
   }
 
   get(): AxionConfig {
     return this.config;
+  }
+
+  needsOnboarding(): boolean {
+    return !this.config.hasCompletedOnboarding;
   }
 
   save(): void {
@@ -129,7 +145,7 @@ export class ConfigManager {
   }
 
   update(patch: Partial<AxionConfig>): void {
-    this.config = normalizeConfig({ ...this.config, ...patch });
+    this.config = normalizeConfig({ ...this.config, ...patch }, true);
     this.save();
   }
 }

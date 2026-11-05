@@ -7,6 +7,7 @@ export interface ReplLike {
   print(msg: string): void;
   question(q: string): Promise<string>;
   questionSecret(q: string): Promise<string>;
+  select(prompt: string, options: string[]): Promise<number | null>;
   clearScreen(): void;
   exit(code?: number): void;
   resetContext(): void;

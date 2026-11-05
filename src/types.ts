@@ -40,9 +40,12 @@ export interface ToolDefinition {
   };
 }
 
+export type AccessScope = 'workspace' | 'global';
+
 export interface ToolExecutionContext {
   permissions: PermissionSettings;
   cwd: string;
+  accessScope: AccessScope;
   notice?: (msg: string) => void;
 }
 
@@ -69,9 +72,10 @@ export interface PermissionSettings {
 export type ProviderType = 'google-ai-studio' | 'openai-compatible';
 
 export interface CustomModel {
-  id: string;      // model id sent to the provider
-  label: string;   // display label
+  id: string;      // model basename/model ID sent to the provider
+  label: string;   // user-facing model name
   provider: ProviderType;
+  baseUrl?: string; // optional per-model OpenAI-compatible endpoint
 }
 
 export interface AxionConfig {
@@ -83,8 +87,11 @@ export interface AxionConfig {
   model: string;                 // currently selected model id
   customModels: CustomModel[];
   thinkingLevel: ThinkingLevel;
-  instructions: string;          // custom system prompt
+  systemPrompt: string;          // explicit system prompt (legacy instructions is migrated)
   permissions: PermissionSettings;
+  accessScope: AccessScope;
+  maxToolCallsPerRequest: number;
+  hasCompletedOnboarding: boolean;
 }
 
 export interface ProviderChatOptions {
@@ -119,7 +126,7 @@ export const DEFAULT_MODEL_ID = 'gemini-3.5-flash';
 export const DEFAULT_PERMISSIONS: PermissionSettings = {
   webAccess: true,
   searchAccess: true,
-  shellExec: false, // default-deny for safety
+  shellExec: true, // owner requested shell execution enabled by default
   fileRead: true,
   fileWrite: false,
 };
@@ -132,7 +139,7 @@ export const THINKING_BUDGET: Record<Exclude<ThinkingLevel, 'off'>, number> = {
 };
 
 export const USER_AGENT =
-  'Mozilla/5.0 (compatible; AxionCLI/1.0; +https://github.com/azrielspace852-wq/axion-ai-agents-cli)';
+  'Mozilla/5.0 (compatible; AxionCLI/1.1; +https://github.com/azrielspace852-wq/axion-ai-agents-cli)';
 
 export const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';

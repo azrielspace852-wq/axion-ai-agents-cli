@@ -110,6 +110,29 @@ export class MemoryStore {
     return doc;
   }
 
+  updateEntry(id: string, num: number, content: string): MemoryFile | null {
+    const doc = this.load(id);
+    const nextContent = content.trim();
+    if (!doc || !Number.isInteger(num) || num < 1 || !nextContent) return null;
+    const entry = doc.memories.find((memory) => memory['memory-number'] === num);
+    if (!entry) return null;
+    entry.content = nextContent;
+    entry.timestamp = new Date().toISOString();
+    this.write(doc);
+    return doc;
+  }
+
+  renameTopic(id: string, about: string): MemoryFile | null {
+    const doc = this.load(id);
+    const nextAbout = about.trim();
+    if (!doc || !nextAbout) return null;
+    const duplicate = this.list().some((item) => item['memory-id'] !== id && item.about.toLowerCase() === nextAbout.toLowerCase());
+    if (duplicate) return null;
+    doc.about = nextAbout;
+    this.write(doc);
+    return doc;
+  }
+
   clear(): void {
     this.ensure();
     for (const file of fs.readdirSync(MEMORY_DIR).filter((name) => name.endsWith('.json'))) {

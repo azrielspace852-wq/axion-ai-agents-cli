@@ -7,7 +7,7 @@ export const ShellTool: AgentTool = {
   definition: {
     name: 'run_shell',
     description:
-      'Execute a shell command on the local machine and return stdout/stderr. Requires the shellExec permission (disabled by default).',
+      'Execute a shell command on the local machine and return stdout/stderr. Requires the shellExec permission (enabled by default on fresh configurations). In workspace scope, use the workspace as the working directory and avoid paths outside it; this is an agent policy, not an OS sandbox.',
     parameters: {
       type: 'object',
       properties: {
@@ -27,13 +27,21 @@ export const ShellTool: AgentTool = {
     }
     const command = String(args.command || '').trim();
     if (!command) return { success: false, output: 'Empty command.' };
-    const cwd = path.resolve(String(args.cwd || ctx.cwd));
+    const workspaceRoot = path.resolve(ctx.cwd);
+    const requestedCwd = path.resolve(String(args.cwd || workspaceRoot));
+    let cwd: string;
+    let realWorkspaceRoot: string;
     try {
+      realWorkspaceRoot = fs.realpathSync(workspaceRoot);
+      cwd = fs.realpathSync(requestedCwd);
       if (!fs.statSync(cwd).isDirectory()) {
         return { success: false, output: `Working directory is not a directory: ${cwd}` };
       }
     } catch {
-      return { success: false, output: `Working directory does not exist or is inaccessible: ${cwd}` };
+      return { success: false, output: `Working directory does not exist or is inaccessible: ${requestedCwd}` };
+    }
+    if (ctx.accessScope === 'workspace' && cwd !== realWorkspaceRoot && !cwd.startsWith(`${realWorkspaceRoot}${path.sep}`)) {
+      return { success: false, output: `Workspace access scope blocks working directory outside the workspace: ${cwd}` };
     }
 
     return new Promise((resolve) => {

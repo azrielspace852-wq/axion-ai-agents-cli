@@ -18,13 +18,18 @@ const { assertPublicHttpUrl, createPinnedLookup, isPrivateOrReservedIp, resolveP
 test('configuration defaults are safe and persisted atomically with private file mode', () => {
   const manager = new ConfigManager();
   assert.equal(manager.get().version, 1);
-  assert.equal(manager.get().permissions.shellExec, false);
+  assert.equal(manager.get().permissions.shellExec, true);
   assert.equal(manager.get().language, 'en');
+  assert.equal(manager.get().accessScope, 'workspace');
+  assert.equal(manager.get().maxToolCallsPerRequest, 30);
+  assert.equal(manager.needsOnboarding(), true);
 
   manager.get().language = 'id';
+  manager.get().hasCompletedOnboarding = true;
   manager.save();
   const reloaded = new ConfigManager();
   assert.equal(reloaded.get().language, 'id');
+  assert.equal(reloaded.needsOnboarding(), false);
 
   if (process.platform !== 'win32') {
     const configPath = path.join(process.env.AXION_DATA_DIR, 'config.json');
@@ -36,7 +41,7 @@ test('malformed configuration is preserved and defaults are restored', () => {
   const configPath = path.join(process.env.AXION_DATA_DIR, 'config.json');
   fs.writeFileSync(configPath, '{ this is not json');
   const manager = new ConfigManager();
-  assert.equal(manager.get().permissions.shellExec, false);
+  assert.equal(manager.get().permissions.shellExec, true);
   assert.ok(fs.readdirSync(process.env.AXION_DATA_DIR).some((name) => name.startsWith('config.json.corrupt-')));
 });
 
@@ -246,7 +251,7 @@ test('CLI version command starts without entering the interactive REPL', () => {
     env: { ...process.env },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^1\.0\.2\s*$/);
+  assert.match(result.stdout, /^1\.1\.0\s*$/);
 });
 
 test('installer validates in staging and preserves the prior app if a build fails', () => {
@@ -263,7 +268,7 @@ test('installer validates in staging and preserves the prior app if a build fail
 
   const fakeNode = `#!/bin/sh
 if [ "$1" = "-p" ]; then printf '22.16.0\\n'; exit 0; fi
-if [ "$2" = "--version" ]; then printf '1.0.2\\n'; exit 0; fi
+if [ "$2" = "--version" ]; then printf '1.1.0\\n'; exit 0; fi
 exec "$REAL_NODE" "$@"
 `;
   const fakeNpm = `#!/bin/sh
@@ -274,7 +279,7 @@ case "$1" in
     if [ "$1" = "run" ] && [ "$2" != "build" ]; then exit 1; fi
     if [ "${'${FAKE_NPM_FAIL_BUILD:-0}'}" = "1" ]; then echo 'simulated build/test failure' >&2; exit 1; fi
     mkdir -p dist
-    printf '#!/usr/bin/env node\nconsole.log("1.0.2")\n' > dist/index.js
+    printf '#!/usr/bin/env node\nconsole.log("1.1.0")\n' > dist/index.js
     chmod +x dist/index.js
     exit 0 ;;
   *) exit 1 ;;
@@ -318,4 +323,188 @@ esac
 
 test.after(() => {
   fs.rmSync(testRoot, { recursive: true, force: true });
+});
+
+
+test('configuration migrates legacy instructions and clamps the per-request tool limit', () => {
+  const configPath = path.join(process.env.AXION_DATA_DIR, 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify({
+    version: 1,
+    instructions: 'legacy prompt',
+    permissions: { shellExec: false },
+    maxToolCallsPerRequest: 999,
+  }));
+  const manager = new ConfigManager();
+  assert.equal(manager.get().systemPrompt, 'legacy prompt');
+  assert.equal(manager.get().permissions.shellExec, false, 'explicit prior opt-out is preserved');
+  assert.equal(manager.get().maxToolCallsPerRequest, 100);
+  assert.equal(manager.needsOnboarding(), false);
+});
+
+test('memory entries and topic names can be edited and remain persisted', () => {
+  const store = new MemoryStore();
+  const topic = store.add('Original topic', 'Original fact');
+  const edited = store.updateEntry(topic['memory-id'], 1, 'Updated fact');
+  assert.equal(edited.memories[0].content, 'Updated fact');
+  const renamed = store.renameTopic(topic['memory-id'], 'Renamed topic');
+  assert.equal(renamed.about, 'Renamed topic');
+  const reloaded = store.load(topic['memory-id']);
+  assert.equal(reloaded.about, 'Renamed topic');
+  assert.equal(reloaded.memories[0].content, 'Updated fact');
+});
+
+test('agent system prompt describes workspace, anti-hallucination, planning, and access scope', () => {
+  const { Agent } = require('../dist/agent/Agent');
+  const { DEFAULT_CONFIG } = require('../dist/config/ConfigManager');
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  cfg.systemPrompt = 'Use concise Indonesian.';
+  const agent = new Agent(() => cfg, () => {});
+  const prompt = agent.buildSystemPrompt('Known preference: concise');
+  assert.match(prompt, /Workspace root:/);
+  assert.match(prompt, /ANTI-HALLUCINATION/);
+  assert.match(prompt, /TASK PLANNING/);
+  assert.match(prompt, /WORKSPACE ONLY/);
+  assert.match(prompt, /Use concise Indonesian/);
+  assert.match(prompt, /Known preference: concise/);
+});
+
+test('shell tool blocks an explicit working directory outside workspace scope and logs execution command', async () => {
+  const { ShellTool } = require('../dist/agent/tools/ShellTool');
+  const outside = path.resolve(os.tmpdir());
+  const notices = [];
+  const result = await ShellTool.execute({ command: 'pwd', cwd: outside }, {
+    cwd: process.cwd(), accessScope: 'workspace', notice: (message) => notices.push(message),
+    permissions: { shellExec: true },
+  });
+  assert.equal(result.success, false);
+  assert.match(result.output, /outside the workspace/);
+  assert.equal(notices.length, 0);
+});
+
+test('agent enforces maxToolCallsPerRequest while allowing a final model response', async () => {
+  const axios = require('axios');
+  const originalPost = axios.post;
+  const { Agent } = require('../dist/agent/Agent');
+  const { DEFAULT_CONFIG } = require('../dist/config/ConfigManager');
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  cfg.google.apiKey = 'test-key';
+  cfg.maxToolCallsPerRequest = 2;
+  cfg.permissions.shellExec = true;
+  const notices = [];
+  const modelReplies = [
+    { functionCall: { name: 'run_shell', args: { command: 'echo API_KEY=do-not-print' } } },
+    { functionCall: { name: 'run_shell', args: { command: 'echo two' } } },
+    { functionCall: { name: 'run_shell', args: { command: 'echo must-not-run' } } },
+    null,
+  ];
+  let requestIndex = 0;
+  axios.post = async () => {
+    const next = modelReplies[requestIndex++];
+    return { status: 200, data: { candidates: [{ content: { parts: next ? [next] : [{ text: 'done within the limit' }] }, finishReason: 'STOP' }] } };
+  };
+  try {
+    const agent = new Agent(() => cfg, (message) => notices.push(message));
+    const history = [{ role: 'user', content: 'Run a few commands' }];
+    const answer = await agent.chat(history, agent.buildSystemPrompt(''));
+    assert.equal(answer, 'done within the limit');
+    assert.equal(notices.filter((message) => message.startsWith('$ ')).length, 2);
+    assert.equal(notices[0], '$ echo API_KEY=[REDACTED]');
+    assert.doesNotMatch(notices[0], /do-not-print/);
+    assert.equal(notices[1], '$ echo two');
+    const toolMessages = history.filter((message) => message.role === 'tool');
+    assert.equal(toolMessages.length, 3);
+    assert.match(toolMessages[2].content, /tool call limit \(2\) reached/);
+  } finally {
+    axios.post = originalPost;
+  }
+});
+
+test('feedback command prints both contact emails and the issue tracker', async () => {
+  const { CommandRouter } = require('../dist/commands/CommandRouter');
+  const output = [];
+  const { DEFAULT_CONFIG } = require('../dist/config/ConfigManager');
+  const fakeContext = {
+    args: '', config: structuredClone(DEFAULT_CONFIG), saveConfig() {},
+    repl: { print: (message) => output.push(message) },
+  };
+  await new CommandRouter().route('/feedback', fakeContext);
+  const joined = output.join('\n');
+  assert.match(joined, /axionneuralis@gmail\.com/);
+  assert.match(joined, /azrielspace852@gmail\.com/);
+  assert.match(joined, /github\.com\/azrielspace852-wq\/axion-ai-agents-cli\/issues/);
+});
+
+test('custom models can be edited while built-in model definitions stay immutable', async () => {
+  const H = require('../dist/commands/handlers');
+  const { DEFAULT_CONFIG } = require('../dist/config/ConfigManager');
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  cfg.customModels = [{ id: 'legacy-model-id', label: 'Legacy model', provider: 'google-ai-studio' }];
+  cfg.model = 'legacy-model-id';
+  const selections = [2, 0, 0]; // edit custom model -> first custom model -> Google AI Studio
+  const answers = ['New display name', 'new-provider-basename'];
+  const ctx = {
+    config: cfg,
+    saveConfig() {},
+    repl: {
+      select: async () => selections.shift(),
+      question: async () => answers.shift(),
+      print() {},
+    },
+  };
+  await H.handleModels(ctx);
+  assert.equal(cfg.customModels[0].label, 'New display name');
+  assert.equal(cfg.customModels[0].id, 'new-provider-basename');
+  assert.equal(cfg.model, 'new-provider-basename');
+  assert.equal(cfg.customModels.length, 1);
+  assert.ok(require('../dist/types').DEFAULT_MODELS.some((item) => item.id === 'gemma-4-31b-it'));
+});
+
+test('access scope and tool limit commands persist selected settings', async () => {
+  const { CommandRouter } = require('../dist/commands/CommandRouter');
+  const { DEFAULT_CONFIG } = require('../dist/config/ConfigManager');
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  const selections = [1, 3]; // global scope, then 30 calls
+  const output = [];
+  const ctx = {
+    args: '', config: cfg, saveConfig() {},
+    repl: { select: async () => selections.shift(), print: (message) => output.push(message) },
+  };
+  const router = new CommandRouter();
+  await router.route('/acces', ctx);
+  await router.route('/tool-limit', ctx);
+  assert.equal(cfg.accessScope, 'global');
+  assert.equal(cfg.maxToolCallsPerRequest, 30);
+  assert.ok(output.some((message) => /global/.test(message)));
+});
+
+test('workspace scope rejects a symlinked working directory that resolves outside workspace', async () => {
+  if (process.platform === 'win32') return;
+  const { ShellTool } = require('../dist/agent/tools/ShellTool');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'axion-workspace-'));
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), 'axion-external-'));
+  const link = path.join(root, 'linked-outside');
+  try {
+    fs.symlinkSync(external, link, 'dir');
+    const result = await ShellTool.execute({ command: 'pwd', cwd: link }, {
+      cwd: root, accessScope: 'workspace', permissions: { shellExec: true },
+    });
+    assert.equal(result.success, false);
+    assert.match(result.output, /outside the workspace/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(external, { recursive: true, force: true });
+  }
+});
+
+test('selected custom model metadata is applied only when its provider matches active provider', () => {
+  const { Agent } = require('../dist/agent/Agent');
+  const { DEFAULT_CONFIG } = require('../dist/config/ConfigManager');
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  cfg.model = 'private-openai-model';
+  cfg.customModels = [{ id: 'private-openai-model', label: 'Private OpenAI Model', provider: 'openai-compatible', baseUrl: 'https://custom.example/v1' }];
+  cfg.activeProvider = 'google-ai-studio';
+  cfg.google.apiKey = 'google-test-key';
+  cfg.openaiCompatible = { baseUrl: '', apiKey: '' };
+  const agent = new Agent(() => cfg, () => {});
+  assert.equal(agent.hasApiKey(), true, 'active Google provider should not be overridden by a mismatched OpenAI custom model');
 });

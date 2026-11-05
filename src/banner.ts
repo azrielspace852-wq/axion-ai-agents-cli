@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 
-export const VERSION = '1.0.2';
+export const VERSION = '1.1.0';
 
 // ANSI Shadow style banner: "AXION CLI"
 const BANNER = [

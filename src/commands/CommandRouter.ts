@@ -11,12 +11,22 @@ export class CommandRouter {
     ctx.args = rest.join(' ');
 
     switch (cmd) {
+      case 'feedback':
+        return (await H.handleFeedback(ctx)) || {};
+      case 'acces':
+      case 'access':
+        return (await H.handleAccess(ctx)) || {};
+      case 'tool-limit':
+      case 'tool-calls':
+        return (await H.handleToolLimit(ctx)) || {};
       case 'models':
         return (await H.handleModels(ctx)) || {};
       case 'thinking':
         return (await H.handleThinking(ctx)) || {};
+      case 'system':
+      case 'system-prompt':
       case 'instructions':
-        return (await H.handleInstructions(ctx)) || {};
+        return (await H.handleSystemPrompt(ctx)) || {};
       case 'memory':
         return (await H.handleMemory(ctx)) || {};
       case 'api-key':

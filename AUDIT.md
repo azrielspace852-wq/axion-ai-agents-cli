@@ -1,59 +1,42 @@
-# AXION AI Agents CLI — Audit and Validation Report
+# AXION AI Agents CLI — Version 1.1.0 Audit & Validation
 
 ## Scope
 
-The supplied project archive was reviewed across its installer, package metadata, TypeScript source, command handlers, providers, tools, configuration, persistence, and documentation. The project was updated to version `1.0.2` in this working copy.
+This release adds the requested command set, terminal UX, access policy, memory editing, system-prompt behavior, automatic task-planning guidance, custom-model management, and per-request tool-call ceilings.
 
-## Issues identified and addressed
+## Implemented changes
 
-- The README was empty and the GPL license text was incomplete. A GitHub-ready README and the complete GPL-3.0-or-later license text are now included; the README begins with the license badge.
-- The old installer removed the active application directory before the replacement had been built. The updated installer stages the source, installs dependencies, runs the project test suite and CLI smoke test, then activates the new directory while retaining the previous installation as a backup.
-- Installer path handling did not sufficiently guard dangerous targets and did not consistently report the application and user-data locations. The updated installer validates the target and reports the separate paths.
-- Configuration and storage writes could leave incomplete JSON after interruption. Configuration, conversation, and memory writes now use temporary files and atomic rename; local data directories/files use restrictive permissions where supported.
-- Corrupt configuration files could prevent reliable startup. The loader now preserves a damaged copy and falls back to safe defaults.
-- Conversation and memory identifiers were not sufficiently constrained. Storage now validates IDs and document structures before reading, deleting, or writing.
-- API-key prompts could echo secrets into the terminal. Secret prompts now suppress typed input; stored keys remain plaintext on disk, protected by local filesystem permissions rather than encryption.
-- Google model reasoning settings were not aligned with the current API fields. Gemini 3 now uses `thinkingLevel`, Gemini 2.5 uses `thinkingBudget`, Gemma 4 uses its documented binary `MINIMAL`/`HIGH` switch, and Gemini 3 sampling overrides are omitted. The CLI explains when a model cannot fully disable thinking.
-- Gemini tool-calling history discarded opaque thought-signature parts and provider call IDs. These are now preserved in active and saved conversation history. Parallel function responses are grouped and kept in call order.
-- Web fetching did not sufficiently restrict local/private destinations. The scraper now limits requests to HTTP(S), rejects local and reserved destinations, validates every redirect, pins validated DNS answers to the connection, disables implicit proxy routing for the fetch, and limits response size and redirects.
-- Shell execution and search input handling needed stronger validation. Shell execution remains disabled by default, validates the working directory, and has bounded execution/output. Search result counts are capped and HTTP error responses are checked.
-- There was no automated regression suite. Core storage, configuration, tool registry, network validation, Gemini request construction, CLI startup, and installer upgrade safety tests were added.
+1. **`/feedback`** prints `axionneuralis@gmail.com`, `azrielspace852@gmail.com`, and the repository Issues URL.
+2. **Terminal chat UX** enters the ANSI alternate full-screen buffer and clears it on startup, restores the terminal on exit, shows an animated thinking spinner, and draws a rounded input frame at the bottom terminal rows. Tool names/arguments are shown before execution; likely credential-bearing fields and command tokens are redacted in the display.
+3. **`/acces` / `/access`** selects workspace-policy or global scope. Shell working directories are checked against the workspace's real path in workspace mode, including symlink resolution.
+4. **Arrow navigation** uses ArrowUp/ArrowDown and Enter in TTY selection menus. Non-TTY environments retain numeric selection fallback.
+5. **First-run help** is shown once for a newly created configuration and then persisted as completed.
+6. **Shell permission** defaults to enabled for fresh configurations. Existing configurations with an explicit `shellExec: false` retain that opt-out.
+7. **Memory** can be added, edited, renamed, deleted by entry/topic, or cleared. Edited content and topic names persist atomically through the memory store.
+8. **System prompt** is now stored as `systemPrompt`; legacy `instructions` configuration is migrated on load and `/instructions` remains a compatibility command alias. The base prompt adds a workspace inventory, evidence and anti-hallucination rules, action verification, execution transparency, and complex-task checklist guidance.
+9. **Complex task planning** is explicitly instructed in the system prompt: create a Markdown checklist for long or multi-step requests and maintain completion state as the work progresses.
+10. **Custom models** support edit/delete operations for custom entries only, including display name, provider model basename/ID, provider, and optional model-specific OpenAI-compatible base URL. Built-in models are never offered for deletion.
+11. **Tool call limit** is persisted as `maxToolCallsPerRequest`, defaults to 30, is configurable through `/tool-limit`, is clamped to 1–100, and is enforced across all tool calls in one user request.
 
-## Validation performed
+## Local validation
 
-| Check | Result |
-|---|---|
-| TypeScript compile (`tsc -p tsconfig.json`) | Passed with TypeScript 5.8.3 and temporary declarations for unavailable external modules; the pinned TypeScript 5.4.5 install could not be fetched |
-| Automated tests (`npm test`) | 11 passed, 0 failed in the offline validation harness |
-| Installer shell syntax (`bash -n install.sh`) | Passed |
-| Installer staging/upgrade simulation | Passed using temporary fake `npm`/`node` commands |
-| Failed-build protection simulation | Passed; existing application directory remained untouched |
-| CLI version smoke test | Passed (`1.0.2`) |
-| Exact remote `curl | bash` command | Not verified; DNS resolution to `raw.githubusercontent.com` failed from this environment |
-| Real dependency installation from npm | Not verified; npm registry access was unavailable |
-| Live Google AI Studio / OpenAI-compatible calls | Not verified; no API credentials were supplied |
-| Live Google/DuckDuckGo search and website scraping | Not verified; external network access was unavailable |
-| Physical Termux-device installation | Not verified; validation used a Unix-like container simulation |
+- TypeScript compile: **passed** with the available global TypeScript compiler and temporary offline declaration shims.
+- Core regression suite: **21 passed, 0 failed**.
+- `bash -n install.sh`: **passed**.
+- Package metadata and CLI version consistency: **passed** (`1.1.0`).
+- Installer staging/rollback regression: **passed** within the existing installer test harness.
+- Pseudo-TTY integration checks: **passed** for first-launch help, ArrowUp/ArrowDown/Enter menu selection, feedback output, rounded bottom input frame, alternate-screen entry/restore, and animated spinner frames.
+- Tool-call ceiling integration: **passed**; with a test limit of 2, exactly two shell commands ran and the third received a tool-limit error result.
+- Workspace working-directory guard: **passed**, including a symlink that resolves outside the workspace.
 
-### Offline-test limitation
+## Verification limits
 
-The container could not reach the GitHub raw host or npm registry. To compile and run the local regression suite without fetching dependencies, temporary compile/runtime shims for external modules were used in the working environment. Those shims and generated `node_modules`/`dist` directories are excluded from the ZIP. The test suite mocks HTTP-provider responses; it does not establish that real third-party services accept credentials or return successful responses.
+- `npm install --no-audit --no-fund` timed out because the package registry was unreachable from this environment. The environment did not contain the declared project dependencies. To perform local validation, temporary `axios`, `chalk`, and `cheerio` shims plus an available Node type package were used only in the working directory. These test shims are excluded from the release ZIP. As a result, this is not a clean install using the exact pinned dependency versions (`axios@1.7.2`, `chalk@4.1.2`, `cheerio@1.0.0`, TypeScript 5.4.5, and `@types/node@20.14.0`).
+- No live Google AI Studio or OpenAI-compatible API request was possible. Provider behavior remains dependent on valid credentials, model access, and service availability.
+- Pseudo-TTY checks ran on a Linux terminal emulation, not a physical Android/Termux device. The input frame anchors to the terminal's last rows on every prompt, which is the correct terminal-level placement above Termux's available keyboard area when the terminal viewport reflects the keyboard. Exact device-specific keyboard/window behavior still requires a Termux device test.
+- **Workspace scope is not an OS sandbox.** It restricts the shell tool's requested working directory and guides the agent not to operate outside the workspace, but arbitrary shell commands still execute with the current OS user's permissions and can address external paths. Enforcing a hard filesystem boundary requires an OS/container sandbox (for example, a supported sandbox runtime), which is not bundled or assumed here.
+- Shell execution is enabled by default for fresh configurations as requested. It executes with the current user's OS privileges; users who do not accept that risk should disable `shellExec` using `/permissions`.
 
-No `package-lock.json` was generated because the npm registry was unreachable. Direct dependency versions are pinned exactly in `package.json`, but transitive dependency resolution is not yet locked. Generate and commit a lockfile in an environment with npm registry access before treating the dependency graph as fully reproducible.
+## Release contents
 
-## Remaining product limitations
-
-- General-purpose file read/write tools are not implemented in this release. They are not presented as active permission toggles.
-- The web-search tool parses public search-engine HTML rather than using an official Google Search API; search engines can rate-limit requests or change markup.
-- API credentials are stored as plaintext in the local configuration file. Filesystem permissions reduce casual local exposure but are not encryption.
-- Enabling `shellExec` permits the agent to execute commands with the current operating-system user's privileges. It remains disabled by default.
-- The `/thinking off` choice cannot disable reasoning on every provider/model. In particular, Gemini 3 and Gemini 2.5 Pro use the provider default because the API does not expose a full off mode for those models.
-
-## GitHub deployment requirement
-
-This ZIP updates only the supplied local project copy. It does not push changes to the GitHub repository. The one-line installer URL points to the repository's `main` branch; the updated source, especially `install.sh`, must be committed/published to that branch before the exact `curl -fsSL .../main/install.sh | bash` command can install this repaired version. The remote script could not be updated or executed from this environment.
-
-
-## Follow-up build fix (1.0.2)
-
-The subsequent Termux install log exposed a compiler failure in four files importing `uuid@9.0.1`. The package release metadata does not declare a TypeScript declaration entry, so the compiler reported TS7016. The project now uses `randomUUID` from `node:crypto` in `GoogleAIProvider`, `OpenAICompatProvider`, `ConversationStore`, and `MemoryStore`; the `uuid` dependency was removed from `package.json`. Regression checks assert that generated provider tool-call IDs, conversation IDs, and memory IDs remain valid UUID v4 values. The updated offline harness passed 11 tests. This update does not depend on adding a stub declaration or an external `@types/uuid` package.
+The archive contains source, tests, documentation, installer, GPL license, and compiled `dist` output. It excludes `node_modules`, temporary test shims, and npm cache data.
