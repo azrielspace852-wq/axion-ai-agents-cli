@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Thin shim that forwards to the compiled entry point.
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec node "$DIR/dist/index.js" "$@"
