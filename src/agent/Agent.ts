@@ -97,6 +97,7 @@ export class Agent {
   private cancelled = false;
   private abortController: AbortController | null = null;
   private confirmFn?: (question: string) => Promise<boolean>;
+  private statusFn?: (phase: string, detail?: string) => void;
 
   constructor(
     private getConfig: () => AxionConfig,
@@ -109,6 +110,10 @@ export class Agent {
   }
   setNotice(notice: (message: string) => void): void {
     this.notice = notice;
+  }
+  // Dynamic status indicator (phase: sending/receiving/tool/processing/memory).
+  setStatus(fn: (phase: string, detail?: string) => void): void {
+    this.statusFn = fn;
   }
   setConfirm(fn: (question: string) => Promise<boolean>): void {
     this.confirmFn = fn;
@@ -240,6 +245,7 @@ export class Agent {
       }
       let res;
       try {
+        this.statusFn?.('sending');
         res = await provider.chat({
           model,
           messages,
@@ -248,6 +254,10 @@ export class Agent {
           thinkingLevel: cfg.thinkingLevel,
           ...(typeof cfg.maxOutputTokens === 'number' ? { maxOutputTokens: cfg.maxOutputTokens } : {}),
           signal,
+          onChunk: (event) => {
+            if (event.type === 'delta') this.statusFn?.('receiving');
+            else if (event.type === 'tool_call') this.statusFn?.('tool', event.toolName);
+          },
         });
       } catch (e) {
         if (this.cancelled) {
@@ -274,6 +284,7 @@ export class Agent {
             continue;
           }
           const safeArguments = redactToolArguments(tc.arguments);
+          this.statusFn?.('tool', tc.name);
           if (tc.name === 'run_shell') {
             this.notice(`$ ${redactSensitiveText(String(tc.arguments.command || ''))}`);
           } else {
@@ -283,6 +294,7 @@ export class Agent {
           }
           toolCallsExecuted += 1;
           const result = await this.tools.execute(tc.name, tc.arguments, ctx);
+          this.statusFn?.('processing');
           messages.push({
             role: 'tool',
             name: tc.name,

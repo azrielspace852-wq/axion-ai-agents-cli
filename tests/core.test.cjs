@@ -59,6 +59,12 @@ test('conversation storage creates, persists, lists, backs up, and rejects unsaf
   assert.ok(fs.existsSync(store.backup(conversation['conversation-id'])));
   assert.equal(store.load('../../outside'), null);
   store.delete('../../outside');
+  // rename persists and reloads; empty/unknown ids rejected
+  const renamed = store.rename(conversation['conversation-id'], 'Renamed chat');
+  assert.equal(renamed['conversation-name'], 'Renamed chat');
+  assert.equal(store.load(conversation['conversation-id'])['conversation-name'], 'Renamed chat');
+  assert.equal(store.rename(conversation['conversation-id'], '   '), null);
+  assert.equal(store.rename('does-not-exist', 'x'), null);
 });
 
 test('conversation storage preserves provider metadata required for Gemini tool calling', () => {
@@ -189,6 +195,34 @@ test('OpenAI-compatible provider generates UUID v4 IDs for tool calls without pr
   }
 });
 
+test('providers use streaming with idle watchdog and no flat total timeout', async () => {
+  const axios = require('axios');
+  const originalPost = axios.post;
+  const { GoogleAIProvider } = require('../dist/agent/providers/GoogleAIProvider');
+  const { OpenAICompatProvider } = require('../dist/agent/providers/OpenAICompatProvider');
+  const captured = [];
+  axios.post = async (_url, _body, config) => {
+    captured.push(config || {});
+    return { status: 200, data: {
+      choices: [{ message: { content: 'ok' }, finish_reason: 'STOP' }],
+      candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
+    } };
+  };
+  try {
+    const g = new GoogleAIProvider('k');
+    await g.chat({ model: 'gemini-3.5-flash', messages: [{ role: 'user', content: 'hi' }] });
+    const o = new OpenAICompatProvider('https://api.example.test/v1', 'k');
+    await o.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+    assert.equal(captured.length, 2);
+    for (const config of captured) {
+      assert.equal(config.responseType, 'stream', 'provider must request a stream');
+      assert.ok(!config.timeout || config.timeout === 0, `flat total timeout must be removed, got ${config.timeout}`);
+    }
+  } finally {
+    axios.post = originalPost;
+  }
+});
+
 test('memory storage creates topics, appends entries, renumbers deletes, and rejects unsafe IDs', () => {
   const store = new MemoryStore();
   store.add('Project', 'First fact');
@@ -252,7 +286,7 @@ test('CLI version command starts without entering the interactive REPL', () => {
     env: { ...process.env },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^1\.4\.0\s*$/);
+  assert.match(result.stdout, /^1\.5\.0\s*$/);
 });
 
 test('installer validates in staging and preserves the prior app if a build fails', () => {

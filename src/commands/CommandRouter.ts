@@ -6,7 +6,7 @@ import { t } from '../i18n';
 export const COMMAND_LIST: string[] = [
   '/help', '/exit', '/models', '/thinking', '/system', '/system-prompt', '/instructions',
   '/memory', '/api-key', '/permissions', '/tool-limit', '/max-tool-call', '/max-token',
-  '/privacy-policy', '/provider', '/clear', '/conversation', '/language', '/feedback',
+  '/privacy-policy', '/provider', '/clear', '/conversation', '/conversations', '/rename', '/language', '/feedback',
   '/access', '/acces', '/verbose',
 ];
 
@@ -57,6 +57,8 @@ export class CommandRouter {
       case 'conversation':
       case 'conversations':
         return (await H.handleConversation(ctx)) || {};
+      case 'rename':
+        return (await H.handleRename(ctx)) || {};
       case 'language':
       case 'lang':
         return (await H.handleLanguage(ctx)) || {};

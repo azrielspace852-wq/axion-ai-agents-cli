@@ -24,6 +24,10 @@ export class REPL implements ReplLike {
   private suppressInputEcho = false;
   private spinnerTimer?: NodeJS.Timeout;
   private spinnerIndex = 0;
+  private statusActive = false;
+  private statusText = '';
+  private userMessageCount = 0;
+  private readonly AUTO_SUMMARY_EVERY = 3; // auto-summarize memory every N user messages
   private handling = false;
   private onLineBound!: (line: string) => void;
   private onKeypressBound!: (str: string, key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }) => void;
@@ -46,6 +50,7 @@ export class REPL implements ReplLike {
   ) {
     setLanguage(cfgMgr.get().language);
     this.agent.setNotice((message) => this.notice(message));
+    this.agent.setStatus((phase, detail) => this.updateStatus(phase, detail));
   }
 
   async start(): Promise<void> {
@@ -101,6 +106,7 @@ export class REPL implements ReplLike {
     return {
       args: '',
       config: this.cfgMgr.get(),
+      configManager: this.cfgMgr,
       saveConfig: () => this.cfgMgr.save(),
       repl: this,
       conversations: this.conversations,
@@ -142,7 +148,7 @@ export class REPL implements ReplLike {
     const memoryText = this.memories.toPromptText();
     const systemPrompt = this.agent.buildSystemPrompt(memoryText);
     const generatedStart = this.history.length;
-    this.startThinking();
+    this.startStatus('sending');
     // ESC-cancel: while the agent is working, pressing Escape requests cancellation.
     const onEsc = (_str: string, key?: { name?: string }) => {
       if (key?.name === 'escape') {
@@ -153,18 +159,39 @@ export class REPL implements ReplLike {
     process.stdin.on('keypress', onEsc);
     try {
       const reply = await this.agent.chat(this.history, systemPrompt);
-      this.stopThinking();
+      this.stopStatus();
       this.print(chalk.green('AXION ❯ ') + reply);
+      // Auto-summarize into long-term memory every N user messages.
+      this.userMessageCount += 1;
+      if (this.userMessageCount % this.AUTO_SUMMARY_EVERY === 0) {
+        void this.autoSummarizeMemory();
+      }
     } catch (error: unknown) {
-      this.stopThinking();
+      this.stopStatus();
       const message = error instanceof Error ? error.message : String(error);
       this.print(chalk.red('Error: ') + message);
     } finally {
       process.stdin.removeListener('keypress', onEsc);
-      this.stopThinking();
+      this.stopStatus();
       for (const message of this.history.slice(generatedStart)) {
         this.bufferMessage(message.role, message.content, message);
       }
+    }
+  }
+  // Summarize the recent exchange and persist it (summarized, never raw) to MemoryStore.
+  private async autoSummarizeMemory(): Promise<void> {
+    try {
+      const recent = this.history.slice(-6).filter((m) => m.role === 'user' || m.role === 'assistant').map((m) => `${m.role}: ${(m.content || '').slice(0, 500)}`).join('\n');
+      if (!recent.trim()) return;
+      this.startStatus('memory');
+      const summary = await this.agent.summarizeForMemory(recent);
+      this.stopStatus();
+      if (summary && summary.trim()) {
+        this.memories.add('Auto-summarized conversation', summary.trim());
+      }
+    } catch (error: unknown) {
+      this.stopStatus();
+      log.error(`autoSummarizeMemory failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -192,31 +219,78 @@ export class REPL implements ReplLike {
     }
   }
 
-  // ---- Spinner ----
-  private startThinking(): void {
+  // ---- Dynamic status line (replaces the static "thinking..." spinner) ----
+  private statusTextFor(phase: string, detail?: string): string {
+    switch (phase) {
+      case 'sending': return t('status.sending');
+      case 'thinking': return t('status.thinking');
+      case 'receiving': return t('status.receiving');
+      case 'tool': return t('status.tool', { tool: detail || '…' });
+      case 'processing': return t('status.processing');
+      case 'memory': return t('status.memory');
+      default: return t('status.thinking');
+    }
+  }
+  private renderStatus(): void {
+    if (!this.statusActive || !process.stdout.isTTY) return;
+    process.stdout.write(`\r\x1b[2K${chalk.cyan(`${SPINNER_FRAMES[this.spinnerIndex]} ${this.statusText}`)}`);
+  }
+  private startStatus(phase: string, detail?: string): void {
+    this.statusText = this.statusTextFor(phase, detail);
     if (!process.stdout.isTTY) {
-      this.print(chalk.dim(t('agent.thinking')));
+      this.print(chalk.dim(this.statusText));
+      this.statusActive = true;
       return;
     }
+    this.statusActive = true;
     this.spinnerIndex = 0;
-    process.stdout.write(chalk.cyan(`${SPINNER_FRAMES[0]} ${t('agent.thinking')}`));
+    this.renderStatus();
+    if (this.spinnerTimer) clearInterval(this.spinnerTimer);
     this.spinnerTimer = setInterval(() => {
       this.spinnerIndex = (this.spinnerIndex + 1) % SPINNER_FRAMES.length;
-      process.stdout.write(`\r\x1b[2K${chalk.cyan(`${SPINNER_FRAMES[this.spinnerIndex]} ${t('agent.thinking')}`)}`);
+      this.renderStatus();
     }, 90);
   }
-
-  private stopThinking(): void {
+  // Called by the Agent on every phase transition. Updates the text in-place.
+  private updateStatus(phase: string, detail?: string): void {
+    const next = this.statusTextFor(phase, detail);
+    if (next === this.statusText) return;
+    this.statusText = next;
+    if (process.stdout.isTTY) this.renderStatus();
+    else this.print(chalk.dim(next));
+  }
+  private stopStatus(): void {
+    this.statusActive = false;
     if (this.spinnerTimer) {
       clearInterval(this.spinnerTimer);
       this.spinnerTimer = undefined;
-      process.stdout.write('\r\x1b[2K');
     }
+    if (process.stdout.isTTY) process.stdout.write('\r\x1b[2K');
   }
-
+  // Backwards-compatible aliases used by older call sites.
+  private startThinking(): void { this.startStatus('thinking'); }
+  private stopThinking(): void { this.stopStatus(); }
   notice(message: string): void {
-    this.stopThinking();
+    // Print the notice ABOVE the status line: clear the status line, print the
+    // notice on its own line, then redraw the status line so it never mixes with
+    // the user's input line or with tool-execution notices.
+    const wasActive = this.statusActive;
+    const savedText = this.statusText;
+    this.stopStatus();
     this.print(chalk.yellow(message));
+    if (wasActive) {
+      this.statusActive = true;
+      this.statusText = savedText;
+      if (process.stdout.isTTY) {
+        this.renderStatus();
+        if (!this.spinnerTimer) {
+          this.spinnerTimer = setInterval(() => {
+            this.spinnerIndex = (this.spinnerIndex + 1) % SPINNER_FRAMES.length;
+            this.renderStatus();
+          }, 90);
+        }
+      }
+    }
   }
 
   // ---- ReplLike ----
@@ -264,10 +338,14 @@ export class REPL implements ReplLike {
     return choice === 0;
   }
 
-  select(prompt: string, options: string[]): Promise<number | null> {
+  select(prompt: string, options: string[], activeIndex?: number): Promise<number | null> {
+    const activeMarker = ` ${chalk.green('●')} ${chalk.dim(t('status.current'))}`;
     if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== 'function' || !process.stdout.isTTY) {
       this.print(chalk.bold(prompt));
-      options.forEach((option, index) => this.print(` ${index + 1}. ${option}`));
+      options.forEach((option, index) => {
+        const suffix = index === activeIndex ? activeMarker : '';
+        this.print(` ${index + 1}. ${option}${suffix}`);
+      });
       return this.question('Select number (Enter to cancel): ').then((value) => {
         if (!value.trim()) return null;
         const number = Number(value.trim());
@@ -286,11 +364,13 @@ export class REPL implements ReplLike {
         firstRender = false;
         process.stdout.write(`\r\x1b[2K${chalk.bold(prompt)}\n`);
         options.forEach((option, index) => {
+          const isActive = index === activeIndex;
           const marker = index === selected ? chalk.cyan('❯') : ' ';
           const label = index === selected ? chalk.inverse(` ${option} `) : ` ${option}`;
-          process.stdout.write(`\r\x1b[2K${marker}${label}\x1b[0m\n`);
+          const activeSuffix = isActive && index !== selected ? activeMarker : '';
+          process.stdout.write(`\r\x1b[2K${marker}${label}\x1b[0m${activeSuffix}\n`);
         });
-        process.stdout.write(`\r\x1b[2K${chalk.dim('Use ↑/↓ and Enter; Esc cancels.')}\n`);
+        process.stdout.write(`\r\x1b[2K${chalk.dim('Use ↑/↓ and Enter; Esc cancels. ● = current')}\n`);
       };
 
       const finish = (value: number | null): void => {
@@ -345,6 +425,9 @@ export class REPL implements ReplLike {
 
   resetContext(): void {
     this.history = [];
+    // Also reset the buffered messages of the current conversation so /clear
+    // truly clears the chat/context (not only the screen).
+    if (this.conversation) this.conversation.messages = [];
   }
 
   openConversation(id: string): boolean {
@@ -372,6 +455,16 @@ export class REPL implements ReplLike {
 
   currentConversationId(): string {
     return this.conversation['conversation-id'];
+  }
+  currentConversationName(): string {
+    return this.conversation['conversation-name'];
+  }
+  renameCurrentConversation(newName: string): boolean {
+    const name = newName.trim();
+    if (!name) return false;
+    this.conversation['conversation-name'] = name;
+    this.flushConversation();
+    return true;
   }
 
   // ---- Command suggestion popup (TTY only) ----

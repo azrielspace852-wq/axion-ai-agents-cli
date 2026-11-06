@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { randomUUID } from 'node:crypto';
 import { BaseProvider } from './BaseProvider';
+import { consumeResponseStream } from './streamHelper';
 import {
   ProviderChatOptions,
   ProviderChatResult,
@@ -9,9 +10,7 @@ import {
   THINKING_BUDGET,
   USER_AGENT,
 } from '../../types';
-
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
-
 function buildThinkingConfig(model: string, level: ProviderChatOptions['thinkingLevel']): Record<string, unknown> | undefined {
   if (!level) return undefined;
   if (/^gemma-4-/i.test(model)) {
@@ -36,10 +35,8 @@ function buildThinkingConfig(model: string, level: ProviderChatOptions['thinking
   // Do not send Gemini-specific thinking parameters to other providers/models.
   return undefined;
 }
-
 export class GoogleAIProvider implements BaseProvider {
   constructor(private apiKey: string) {}
-
   async chat(opts: ProviderChatOptions): Promise<ProviderChatResult> {
     const thinkingConfig = buildThinkingConfig(opts.model, opts.thinkingLevel);
     try {
@@ -53,7 +50,6 @@ export class GoogleAIProvider implements BaseProvider {
       throw new Error(msg);
     }
   }
-
   private async request(
     opts: ProviderChatOptions,
     thinkingConfig?: Record<string, unknown>,
@@ -64,7 +60,6 @@ export class GoogleAIProvider implements BaseProvider {
     if (!isGemini3) generationConfig.temperature = opts.temperature ?? 0.7;
     if (opts.maxOutputTokens !== undefined) generationConfig.maxOutputTokens = opts.maxOutputTokens;
     if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig;
-
     const body: Record<string, unknown> = {
       contents: this.buildContents(opts.messages),
       generationConfig,
@@ -83,52 +78,80 @@ export class GoogleAIProvider implements BaseProvider {
         },
       ];
     }
-
-    const url = `${BASE}/models/${encodeURIComponent(opts.model)}:generateContent`;
+    // Streaming endpoint (SSE). No flat total timeout — idle watchdog only.
+    const url = `${BASE}/models/${encodeURIComponent(opts.model)}:streamGenerateContent?alt=sse`;
     const res = await axios.post(url, body, {
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': this.apiKey,
         'User-Agent': USER_AGENT,
+        Accept: 'text/event-stream',
       },
-      timeout: 120000,
-      validateStatus: (status) => status < 500,
+      responseType: 'stream',
+      validateStatus: () => true, // error body is read from the stream itself
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
-
-    if (res.status >= 400) {
-      const message = res.data?.error?.message || `Google AI API returned HTTP ${res.status}`;
-      throw new Error(message);
+    const allParts: unknown[] = [];
+    let finishReason: string | undefined;
+    let blockReason: string | undefined;
+    const onChunk = opts.onChunk;
+    const result = await consumeResponseStream(
+      res,
+      opts.signal,
+      (parsed) => {
+        const ev = parsed as { candidates?: Array<{ content?: { parts?: unknown[] }; finishReason?: string }>; promptFeedback?: { blockReason?: string } };
+        if (ev.promptFeedback?.blockReason) blockReason = ev.promptFeedback.blockReason;
+        const candidate = ev.candidates?.[0];
+        if (!candidate) return;
+        if (candidate.finishReason) finishReason = candidate.finishReason;
+        const parts = candidate.content?.parts;
+        if (!Array.isArray(parts)) return;
+        for (const part of parts) {
+          allParts.push(part);
+          const p = part as { text?: string; functionCall?: { name?: string } };
+          if (typeof p.text === 'string' && p.text) onChunk?.({ type: 'delta', text: p.text });
+          if (p.functionCall && typeof p.functionCall.name === 'string') onChunk?.({ type: 'tool_call', toolName: p.functionCall.name });
+        }
+      },
+      () => { /* heartbeat resets the watchdog inside consumeResponseStream */ },
+    );
+    onChunk?.({ type: 'done' });
+    let parts = allParts;
+    if (result.mode === 'object' || result.mode === 'json') {
+      // Non-stream fallback: provider returned one JSON document (test mocks or non-streaming endpoint).
+      const data = result.data as { candidates?: Array<{ content?: { parts?: unknown[] }; finishReason?: string }>; promptFeedback?: { blockReason?: string } };
+      if (data?.promptFeedback?.blockReason) blockReason = data.promptFeedback.blockReason;
+      const candidate = data?.candidates?.[0];
+      if (!candidate) {
+        throw new Error(blockReason
+          ? `Google AI request was blocked: ${blockReason}`
+          : 'Google AI API returned no candidate response.');
+      }
+      parts = Array.isArray(candidate.content?.parts) ? candidate.content?.parts as unknown[] : [];
+      finishReason = candidate.finishReason;
     }
-
-    const candidate = res.data?.candidates?.[0];
-    if (!candidate) {
-      const blockReason = res.data?.promptFeedback?.blockReason;
-      throw new Error(blockReason
-        ? `Google AI request was blocked: ${blockReason}`
-        : 'Google AI API returned no candidate response.');
+    if (blockReason && parts.length === 0) {
+      throw new Error(`Google AI request was blocked: ${blockReason}`);
     }
-
-    const parts = candidate.content?.parts || [];
     let content = '';
     const toolCalls: ToolCall[] = [];
     for (const part of parts) {
-      if (typeof part.text === 'string') content += part.text;
-      if (part.functionCall && typeof part.functionCall.name === 'string') {
+      const p = part as { text?: string; functionCall?: { name?: string; args?: unknown; id?: string }; thoughtSignature?: string };
+      if (typeof p.text === 'string') content += p.text;
+      if (p.functionCall && typeof p.functionCall.name === 'string') {
         toolCalls.push({
           id: randomUUID(),
-          name: part.functionCall.name,
-          arguments: part.functionCall.args && typeof part.functionCall.args === 'object' && !Array.isArray(part.functionCall.args)
-            ? part.functionCall.args as Record<string, unknown>
+          name: p.functionCall.name,
+          arguments: p.functionCall.args && typeof p.functionCall.args === 'object' && !Array.isArray(p.functionCall.args)
+            ? p.functionCall.args as Record<string, unknown>
             : {},
-          providerCallId: typeof part.functionCall.id === 'string' ? part.functionCall.id : undefined,
-          thoughtSignature: typeof part.thoughtSignature === 'string' ? part.thoughtSignature : undefined,
+          providerCallId: typeof p.functionCall.id === 'string' ? p.functionCall.id : undefined,
+          thoughtSignature: typeof p.thoughtSignature === 'string' ? p.thoughtSignature : undefined,
         });
       }
     }
-    return { content, toolCalls, finishReason: candidate.finishReason, providerParts: parts };
+    return { content, toolCalls, finishReason, providerParts: parts };
   }
-
   private buildContents(messages: ChatMessage[]): unknown[] {
     const contents: unknown[] = [];
     const pendingFunctionResponses: unknown[] = [];
@@ -140,7 +163,6 @@ export class GoogleAIProvider implements BaseProvider {
         pendingFunctionResponses.length = 0;
       }
     };
-
     for (const message of messages) {
       if (message.role === 'system') continue; // system prompt is sent as systemInstruction
       if (message.role === 'tool') {
@@ -153,7 +175,6 @@ export class GoogleAIProvider implements BaseProvider {
         });
         continue;
       }
-
       flushFunctionResponses();
       if (message.role === 'user') {
         contents.push({ role: 'user', parts: [{ text: message.content }] });

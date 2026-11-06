@@ -112,6 +112,12 @@ export interface AxionConfig {
   hasCompletedOnboarding: boolean;
 }
 
+// Streaming chunk events emitted by providers (used for the dynamic status indicator).
+export interface ProviderChunkEvent {
+  type: 'start' | 'delta' | 'tool_call' | 'done';
+  text?: string;      // incremental text delta (when type === 'delta')
+  toolName?: string;  // name of the detected tool call (when type === 'tool_call')
+}
 export interface ProviderChatOptions {
   model: string;
   messages: ChatMessage[];
@@ -121,6 +127,7 @@ export interface ProviderChatOptions {
   temperature?: number;
   maxOutputTokens?: number;
   signal?: AbortSignal;
+  onChunk?: (event: ProviderChunkEvent) => void; // invoked on every streamed chunk / heartbeat
 }
 
 // Mask an API key for display: keep only the last 4 characters.
@@ -165,7 +172,7 @@ export const THINKING_BUDGET: Record<Exclude<ThinkingLevel, 'off'>, number> = {
 };
 
 export const USER_AGENT =
-  'Mozilla/5.0 (compatible; AxionCLI/1.4; +https://github.com/azrielspace852-wq/axion-ai-agents-cli)';
+  'Mozilla/5.0 (compatible; AxionCLI/1.5; +https://github.com/azrielspace852-wq/axion-ai-agents-cli)';
 
 export const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';

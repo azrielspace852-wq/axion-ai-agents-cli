@@ -110,6 +110,15 @@ export class ConversationStore {
       // Invalid IDs are ignored; callers cannot use this method to escape the data directory.
     }
   }
+  rename(id: string, newName: string): ConversationFile | null {
+    const name = newName.trim();
+    if (!name) return null;
+    const doc = this.load(id);
+    if (!doc) return null;
+    doc['conversation-name'] = name;
+    this.write(doc);
+    return doc;
+  }
 
   backup(id: string): string | null {
     const doc = this.load(id);

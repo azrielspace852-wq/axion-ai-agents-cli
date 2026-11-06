@@ -73,6 +73,7 @@ function printFullHelp(): void {
     ['/access', 'Workspace-only or global access scope'],
     ['/clear', 'Clear screen and current context'],
     ['/conversation', 'List/open/delete/backup saved conversations'],
+    ['/rename', 'Rename the current conversation'],
     ['/language', 'Switch interface language (en/id)'],
     ['/feedback', 'Show support contacts'],
     ['/exit', 'Exit the CLI'],

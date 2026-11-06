@@ -10,8 +10,8 @@ import {
 } from '../types';
 import { t, setLanguage } from '../i18n';
 
-async function choose(ctx: CommandContext, prompt: string, options: string[]): Promise<number | null> {
-  return ctx.repl.select(prompt, options);
+async function choose(ctx: CommandContext, prompt: string, options: string[], activeIndex?: number): Promise<number | null> {
+  return ctx.repl.select(prompt, options, activeIndex);
 }
 
 function promptValue(ctx: CommandContext, prompt: string, current: string): Promise<string> {
@@ -39,10 +39,11 @@ export async function handleModels(ctx: CommandContext): Promise<HandlerResult |
   const active = ctx.config.activeProvider;
   const all: CustomModel[] = [...DEFAULT_MODELS, ...ctx.config.customModels].filter((model) => model.provider === active);
   if (!all.length) return ctx.repl.print(`No models available for provider "${active}". Add one with "Add custom model" or switch provider with /provider.`);
+  const activeModelIdx = all.findIndex((model) => model.id === ctx.config.model);
   const selected = await choose(ctx, `Select model (provider: ${active})`, [
-    ...all.map((model) => `${model.label} (${model.id})${model.id === ctx.config.model ? ' [active]' : ''}`),
+    ...all.map((model) => `${model.label} (${model.id})`),
     'Cancel',
-  ]);
+  ], activeModelIdx >= 0 ? activeModelIdx : undefined);
   if (selected === null || selected >= all.length) return;
   const model = all[selected];
   ctx.config.model = model.id;
@@ -85,7 +86,7 @@ async function editCustomModel(ctx: CommandContext): Promise<void> {
     return ctx.repl.print('That model basename is already in use. No changes were saved.');
   }
   const providerOptions = ['Google AI Studio', 'OpenAI-compatible'];
-  const providerIndex = await choose(ctx, `Provider (current: ${model.provider})`, providerOptions);
+  const providerIndex = await choose(ctx, `Provider (current: ${model.provider})`, providerOptions, model.provider === 'openai-compatible' ? 1 : 0);
   if (providerIndex === null) return;
   const nextProvider = providerIndex === 1 ? 'openai-compatible' : 'google-ai-studio';
   let baseUrl = model.baseUrl || '';
@@ -133,7 +134,8 @@ async function deleteCustomModel(ctx: CommandContext): Promise<void> {
 
 export async function handleThinking(ctx: CommandContext): Promise<HandlerResult | void> {
   const levels: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
-  const selected = await choose(ctx, `Thinking level (current: ${ctx.config.thinkingLevel})`, [...levels, 'Cancel']);
+  const activeIdx = levels.indexOf(ctx.config.thinkingLevel);
+  const selected = await choose(ctx, `Thinking level (current: ${ctx.config.thinkingLevel})`, [...levels, 'Cancel'], activeIdx >= 0 ? activeIdx : undefined);
   if (selected === null || selected >= levels.length) return;
   ctx.config.thinkingLevel = levels[selected];
   ctx.saveConfig();
@@ -258,7 +260,7 @@ export async function handlePermissions(ctx: CommandContext): Promise<HandlerRes
         'always-allow — never ask (use with caution)',
         'always-deny — block all dangerous actions',
         'Cancel',
-      ]);
+      ], ctx.config.dangerousActionPolicy === 'always-ask' ? 0 : ctx.config.dangerousActionPolicy === 'always-allow' ? 1 : 2);
       if (p === 0) ctx.config.dangerousActionPolicy = 'always-ask';
       else if (p === 1) ctx.config.dangerousActionPolicy = 'always-allow';
       else if (p === 2) ctx.config.dangerousActionPolicy = 'always-deny';
@@ -272,9 +274,10 @@ export async function handlePermissions(ctx: CommandContext): Promise<HandlerRes
 }
 
 export async function handleAccess(ctx: CommandContext): Promise<HandlerResult | void> {
+  const activeIdx = ctx.config.accessScope === 'workspace' ? 0 : 1;
   const selected = await choose(ctx, `Access scope (current: ${ctx.config.accessScope})`, [
     'Workspace only — current directory policy', 'Global — broader filesystem access', 'Cancel',
-  ]);
+  ], activeIdx);
   if (selected === null || selected === 2) return;
   ctx.config.accessScope = selected === 0 ? 'workspace' : 'global';
   ctx.saveConfig();
@@ -287,9 +290,11 @@ export async function handleAccess(ctx: CommandContext): Promise<HandlerResult |
 export async function handleToolLimit(ctx: CommandContext): Promise<HandlerResult | void> {
   const current = ctx.config.maxToolCallsPerRequest;
   const options = ['5', '10', '20', '30 (default)', '50', '100', 'Enter custom value', 'Cancel'];
-  const selected = await choose(ctx, `Maximum tool calls per request (current: ${current})`, options);
+  const presetValues = [5, 10, 20, 30, 50, 100];
+  const activeIdx = presetValues.indexOf(current);
+  const selected = await choose(ctx, `Maximum tool calls per request (current: ${current})`, options, activeIdx >= 0 ? activeIdx : undefined);
   if (selected === null || selected === 7) return;
-  let value = [5, 10, 20, 30, 50, 100][selected];
+  let value = presetValues[selected];
   if (selected === 6) value = Number((await ctx.repl.question('Enter a limit from 1 to 100: ')).trim());
   if (!Number.isInteger(value) || value < 1 || value > 100) return ctx.repl.print('Invalid limit. Choose an integer from 1 to 100.');
   ctx.config.maxToolCallsPerRequest = value;
@@ -304,12 +309,19 @@ export async function handleProvider(ctx: CommandContext): Promise<HandlerResult
     const options = [
       'Google AI Studio',
       'OpenAI-compatible (built-in)',
-      ...custom.map((p) => `Custom: ${p.name} (${p.id})${cfg.activeProvider === p.id ? ' [active]' : ''}`),
+      ...custom.map((p) => `Custom: ${p.name} (${p.id})`),
       'Add custom provider…',
       ...(custom.length ? ['Edit custom provider…', 'Delete custom provider…'] : []),
       'Save and exit',
     ];
-    const selected = await choose(ctx, `Active provider: ${cfg.activeProvider}`, options);
+    let activeIdx: number | undefined;
+    if (cfg.activeProvider === 'google-ai-studio') activeIdx = 0;
+    else if (cfg.activeProvider === 'openai-compatible') activeIdx = 1;
+    else {
+      const ci = custom.findIndex((p) => p.id === cfg.activeProvider);
+      if (ci >= 0) activeIdx = 2 + ci;
+    }
+    const selected = await choose(ctx, `Active provider: ${cfg.activeProvider}`, options, activeIdx);
     if (selected === null || selected === options.length - 1) break;
     if (selected === 0) {
       cfg.activeProvider = 'google-ai-studio';
@@ -330,24 +342,28 @@ export async function handleProvider(ctx: CommandContext): Promise<HandlerResult
     }
     const addIdx = 2 + custom.length;
     if (selected === addIdx) {
-      // Add custom provider
-      const idRaw = (await ctx.repl.question('Provider id (short slug, e.g. my-openai): ')).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
-      if (!idRaw) { ctx.repl.print('Cancelled — empty id.'); continue; }
-      if (custom.some((p) => p.id === idRaw) || idRaw === 'google-ai-studio' || idRaw === 'openai-compatible') {
-        ctx.repl.print(`Duplicate id "${idRaw}" — provider ids must be unique.`);
-        continue;
+      // Add custom provider (all custom providers are OpenAI-compatible).
+      const name = (await ctx.repl.question('Custom provider name (e.g. My OpenAI): ')).trim();
+      if (!name) { ctx.repl.print('Cancelled — empty name.'); continue; }
+      // Derive a unique slug id from the name.
+      let idRaw = name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'custom';
+      if (idRaw === 'google-ai-studio' || idRaw === 'openai-compatible') idRaw = `${idRaw}-custom`;
+      let suffix = 2;
+      const baseId = idRaw;
+      while (custom.some((p) => p.id === idRaw)) {
+        idRaw = `${baseId}-${suffix}`;
+        suffix += 1;
       }
-      const name = (await ctx.repl.question('Display name: ')).trim() || idRaw;
-      const baseUrl = (await ctx.repl.question('Base URL (OpenAI-compatible /v1): ')).trim();
-      if (!validHttpUrl(baseUrl)) { ctx.repl.print('Invalid base URL.'); continue; }
-      const apiKey = (await ctx.repl.questionSecret('API Key (stored in config.json, mode 0600): ')).trim();
+      const baseUrl = (await ctx.repl.question('Base URL (OpenAI-compatible /v1, e.g. https://api.openai.com/v1): ')).trim();
+      if (!validHttpUrl(baseUrl)) { ctx.repl.print('Invalid base URL — expected absolute HTTP/HTTPS URL without credentials.'); continue; }
+      const apiKey = (await ctx.repl.questionSecret('API Key (secret, stored in config.json mode 0600): ')).trim();
       if (!apiKey) { ctx.repl.print('Cancelled — empty API key.'); continue; }
       const defaultModel = (await ctx.repl.question('Default model (optional, Enter to skip): ')).trim();
       cfg.customProviders = [...custom, { id: idRaw, name, baseUrl: baseUrl.replace(/\/$/, ''), apiKey, ...(defaultModel ? { defaultModel } : {}) }];
       cfg.activeProvider = idRaw;
       if (defaultModel) cfg.model = defaultModel;
       ctx.saveConfig();
-      ctx.repl.print(`Custom provider "${name}" (${idRaw}) added and selected. Key stored masked: ${maskApiKey(apiKey)}`);
+      ctx.repl.print(`Custom provider "${name}" (${idRaw}) added and selected. OpenAI-compatible. Key: ${maskApiKey(apiKey)}`);
       continue;
     }
     const editIdx = addIdx + 1;
@@ -404,16 +420,32 @@ export async function handleConversation(ctx: CommandContext): Promise<HandlerRe
   ctx.repl.flushConversation();
   const list = ctx.conversations.list();
   if (!list.length) return ctx.repl.print('No saved conversations.');
-  const actions = await choose(ctx, 'Conversation actions', ['Open conversation', 'New conversation', 'Delete conversation', 'Backup conversation', 'Cancel']);
-  if (actions === null || actions === 4) return;
+  const actions = await choose(ctx, 'Conversation actions', ['Open conversation', 'New conversation', 'Rename conversation', 'Delete conversation', 'Backup conversation', 'Cancel']);
+  if (actions === null || actions === 5) return;
   if (actions === 1) { ctx.repl.newConversation(); return ctx.repl.print('Started a new conversation.'); }
-  const selected = await choose(ctx, 'Select conversation', [...list.map((item) => `${item['conversation-name']} (${item.messages.length} messages)`), 'Cancel']);
+  if (actions === 2) {
+    // Rename: current conversation by default, or pick another.
+    const pick = await choose(ctx, 'Rename which conversation?', ['Current conversation', 'Pick from list…', 'Cancel']);
+    if (pick === null || pick === 2) return;
+    if (pick === 0) return renameCurrent(ctx);
+    const convIdx = await choose(ctx, 'Select conversation', [...list.map((item) => `${item['conversation-name']} (${item.messages.length} messages)`), 'Cancel']);
+    if (convIdx === null || convIdx >= list.length) return;
+    const target = list[convIdx];
+    const newName = (await ctx.repl.question(`${t('rename.prompt')} [${target['conversation-name']}]: `)).trim();
+    if (!newName) return ctx.repl.print(t('rename.cancelled'));
+    if (ctx.conversations.rename(target['conversation-id'], newName)) ctx.repl.print(t('rename.done'));
+    else ctx.repl.print('Rename failed.');
+    return;
+  }
+  const currentId = ctx.repl.currentConversationId();
+  const activeConvIdx = list.findIndex((item) => item['conversation-id'] === currentId);
+  const selected = await choose(ctx, 'Select conversation', [...list.map((item) => `${item['conversation-name']} (${item.messages.length} messages)`), 'Cancel'], activeConvIdx >= 0 ? activeConvIdx : undefined);
   if (selected === null || selected >= list.length) return;
   const conversation = list[selected];
   if (actions === 0) {
     if (ctx.repl.openConversation(conversation['conversation-id'])) ctx.repl.print(`Opened "${conversation['conversation-name']}".`);
     else ctx.repl.print('Failed to open conversation.');
-  } else if (actions === 2) {
+  } else if (actions === 3) {
     const confirm = await choose(ctx, `Delete "${conversation['conversation-name']}"?`, ['Delete', 'Cancel']);
     if (confirm === 0) { ctx.conversations.delete(conversation['conversation-id']); ctx.repl.print('Conversation deleted.'); }
   } else {
@@ -422,8 +454,27 @@ export async function handleConversation(ctx: CommandContext): Promise<HandlerRe
   }
 }
 
+// /rename [<new name>]: rename the current conversation.
+export async function handleRename(ctx: CommandContext): Promise<HandlerResult | void> {
+  if (ctx.args.trim()) {
+    if (ctx.repl.renameCurrentConversation(ctx.args.trim())) ctx.repl.print(t('rename.done'));
+    else ctx.repl.print(t('rename.cancelled'));
+    return;
+  }
+  return renameCurrent(ctx);
+}
+
+async function renameCurrent(ctx: CommandContext): Promise<void> {
+  const current = ctx.repl.currentConversationName();
+  const newName = (await ctx.repl.question(`${t('rename.prompt')} [${current}]: `)).trim();
+  if (!newName) { ctx.repl.print(t('rename.cancelled')); return; }
+  if (ctx.repl.renameCurrentConversation(newName)) ctx.repl.print(`${t('rename.done')} → "${newName}"`);
+  else ctx.repl.print('Rename failed.');
+}
+
 export async function handleLanguage(ctx: CommandContext): Promise<HandlerResult | void> {
-  const selected = await choose(ctx, 'Interface language', ['English', 'Bahasa Indonesia', 'Cancel']);
+  const activeIdx = ctx.config.language === 'en' ? 0 : 1;
+  const selected = await choose(ctx, 'Interface language', ['English', 'Bahasa Indonesia', 'Cancel'], activeIdx);
   if (selected === null || selected === 2) return;
   ctx.config.language = selected === 1 ? 'id' : 'en';
   setLanguage(ctx.config.language);
@@ -459,6 +510,7 @@ export async function handleHelp(ctx: CommandContext): Promise<HandlerResult | v
     ['/provider', t('help.provider')],
     ['/clear', t('help.clear')],
     ['/conversation', t('help.conversation')],
+    ['/rename', t('help.rename')],
     ['/language', t('help.language')],
     ['/help', t('help.help')],
     ['/exit', t('help.exit')],
