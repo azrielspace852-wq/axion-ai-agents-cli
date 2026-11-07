@@ -280,80 +280,57 @@ test('web scraper URL guard blocks local and reserved address ranges and pins va
   });
 });
 
+test('npm package metadata, lockfile, and public release version are synchronized', () => {
+  const projectRoot = path.join(__dirname, '..');
+  const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+  const lock = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package-lock.json'), 'utf8'));
+  const version = JSON.parse(fs.readFileSync(path.join(projectRoot, 'version.json'), 'utf8'));
+  assert.equal(pkg.name, '@axion-neuralis/axion-ai-cli');
+  assert.equal(pkg.author, 'axion');
+  assert.equal(pkg.version, '1.0.0');
+  assert.equal(lock.name, pkg.name);
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[''].name, pkg.name);
+  assert.equal(lock.packages[''].version, pkg.version);
+  assert.equal(version.name, pkg.name);
+  assert.equal(version.version, pkg.version);
+  assert.equal(pkg.bin['axion-ai-cli'], 'dist/index.js');
+  assert.equal(pkg.publishConfig.registry, 'https://registry.npmjs.org/');
+});
+
 test('CLI version command starts without entering the interactive REPL', () => {
   const result = spawnSync(process.execPath, [path.join(__dirname, '../dist/index.js'), '--version'], {
     encoding: 'utf8',
     env: { ...process.env },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^1\.5\.0\s*$/);
+  assert.match(result.stdout, /^1\.0\.0\s*$/);
 });
 
-test('installer validates in staging and preserves the prior app if a build fails', () => {
+test('npmjs installer delegates installation to the official npm registry', () => {
   const projectRoot = path.join(__dirname, '..');
-  const installHome = fs.mkdtempSync(path.join(os.tmpdir(), 'axion-installer-test-'));
-  const fakeBin = path.join(installHome, 'fake-bin');
-  const termuxPrefix = path.join(installHome, 'termux');
-  const commandDir = path.join(termuxPrefix, 'bin');
-  const appDir = path.join(installHome, '.axion', 'app');
+  const installHome = fs.mkdtempSync(path.join(os.tmpdir(), 'axion-npm-installer-test-'));
+  const fakeBin = path.join(installHome, 'bin');
+  const npmLog = path.join(installHome, 'npm-args.log');
   fs.mkdirSync(fakeBin, { recursive: true });
-  fs.mkdirSync(commandDir, { recursive: true });
-  fs.mkdirSync(appDir, { recursive: true });
-  fs.writeFileSync(path.join(appDir, 'keep-old-installation.txt'), 'previous version');
-
-  const fakeNode = `#!/bin/sh
-if [ "$1" = "-p" ]; then printf '22.16.0\\n'; exit 0; fi
-if [ "$2" = "--version" ]; then printf '1.1.0\\n'; exit 0; fi
-exec "$REAL_NODE" "$@"
-`;
-  const fakeNpm = `#!/bin/sh
-case "$1" in
-  -v) printf '10.9.0\n' ;;
-  install|ci) exit 0 ;;
-  test|run)
-    if [ "$1" = "run" ] && [ "$2" != "build" ]; then exit 1; fi
-    if [ "${'${FAKE_NPM_FAIL_BUILD:-0}'}" = "1" ]; then echo 'simulated build/test failure' >&2; exit 1; fi
-    mkdir -p dist
-    printf '#!/usr/bin/env node\nconsole.log("1.1.0")\n' > dist/index.js
-    chmod +x dist/index.js
-    exit 0 ;;
-  *) exit 1 ;;
-esac
-`;
-  fs.writeFileSync(path.join(fakeBin, 'node'), fakeNode, { mode: 0o755 });
-  fs.writeFileSync(path.join(fakeBin, 'npm'), fakeNpm, { mode: 0o755 });
-
-  const commonEnv = {
-    ...process.env,
-    HOME: installHome,
-    PREFIX: termuxPrefix,
-    REAL_NODE: process.execPath,
-    PATH: `${fakeBin}:${process.env.PATH}`,
-  };
+  fs.writeFileSync(path.join(fakeBin, 'node'), `#!/bin/sh
+if [ "$1" = "-p" ]; then printf '22.16.0\\n'; else exec "${process.execPath}" "$@"; fi
+`, { mode: 0o755 });
+  fs.writeFileSync(path.join(fakeBin, 'npm'), `#!/bin/sh
+if [ "$1" = "--version" ]; then printf '10.9.0\\n'; exit 0; fi
+printf '%s\\n' "$*" >> "${npmLog}"
+exit 0
+`, { mode: 0o755 });
   try {
-    // Run install.sh from a temp copy so its self-delete (after success) does not remove the project source.
-    const installScript = path.join(installHome, 'install.sh');
-    fs.copyFileSync(path.join(projectRoot, 'install.sh'), installScript);
-    const failedUpgrade = spawnSync('bash', [installScript], {
+    const result = spawnSync('bash', [path.join(projectRoot, 'install.sh')], {
       cwd: projectRoot,
-      env: { ...commonEnv, FAKE_NPM_FAIL_BUILD: '1' },
+      env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` },
       encoding: 'utf8',
     });
-    assert.notEqual(failedUpgrade.status, 0, failedUpgrade.stdout);
-    assert.equal(fs.readFileSync(path.join(appDir, 'keep-old-installation.txt'), 'utf8'), 'previous version');
-
-    const successfulUpgrade = spawnSync('bash', [installScript], {
-      cwd: projectRoot,
-      env: commonEnv,
-      encoding: 'utf8',
-    });
-    assert.equal(successfulUpgrade.status, 0, successfulUpgrade.stderr || successfulUpgrade.stdout);
-    assert.ok(fs.existsSync(path.join(appDir, 'dist', 'index.js')));
-    const commandLink = path.join(commandDir, 'axion-cli');
-    assert.equal(fs.lstatSync(commandLink).isSymbolicLink(), true);
-    const backups = fs.readdirSync(path.join(installHome, '.axion')).filter((name) => name.includes('.backup.'));
-    assert.ok(backups.length >= 1);
-    assert.equal(fs.readFileSync(path.join(installHome, '.axion', backups[0], 'keep-old-installation.txt'), 'utf8'), 'previous version');
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const args = fs.readFileSync(npmLog, 'utf8');
+    assert.match(args, /install --global @axion-neuralis\/axion-ai-cli@latest --registry https:\/\/registry\.npmjs\.org\//);
+    assert.match(result.stdout, /npmjs/);
   } finally {
     fs.rmSync(installHome, { recursive: true, force: true });
   }
@@ -571,12 +548,13 @@ test('terminal update --info shows installed vs latest without updating', () => 
   assert.match(result.stdout, /Latest available:/);
 });
 
-test('terminal update dry-run prints the exact install URL', () => {
+test('terminal update dry-run prints the npmjs install command', () => {
   const result = spawnSync(process.execPath, [path.join(__dirname, '../dist/index.js'), 'update'], {
     encoding: 'utf8', env: { ...process.env, AXION_UPDATE_DRY_RUN: '1' },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /curl -fsSL https:\/\/raw\.githubusercontent\.com\/azrielspace852-wq\/axion-ai-agents-cli\/main\/install\.sh \| bash/);
+  assert.match(result.stdout, /npm install --global @axion-neuralis\/axion-ai-cli@latest/);
+  assert.match(result.stdout, /https:\/\/registry\.npmjs\.org\//);
 });
 
 test('terminal --feedback prints support contacts and exits cleanly on EOF', () => {
@@ -587,7 +565,7 @@ test('terminal --feedback prints support contacts and exits cleanly on EOF', () 
   assert.match(result.stdout, /github\.com\/azrielspace852-wq/);
 });
 
-// ---- v1.4.0 feature tests ----
+// ---- provider and permissions regression tests ----
 test('custom providers persist, enforce unique ids, and switch without re-entering credentials', () => {
   const { ConfigManager } = require('../dist/config/ConfigManager');
   const configPath = path.join(process.env.AXION_DATA_DIR, 'config.json');

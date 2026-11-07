@@ -12,8 +12,21 @@ import { REPL } from './repl/REPL';
 import { VERSION } from './banner';
 import { handleFeedback } from './commands/handlers';
 
-const UPDATE_URL = 'https://raw.githubusercontent.com/azrielspace852-wq/axion-ai-agents-cli/main/install.sh';
-const REMOTE_UPDATE_INFO = 'https://raw.githubusercontent.com/azrielspace852-wq/axion-ai-agents-cli/main/update-info.json';
+const NPM_PACKAGE_NAME = '@axion-neuralis/axion-ai-cli';
+const NPM_REGISTRY_URL = 'https://registry.npmjs.org/';
+const NPM_LATEST_URL = 'https://registry.npmjs.org/@axion%2Faxion-ai-cli/latest';
+const UPDATE_COMMAND = `npm install --global ${NPM_PACKAGE_NAME}@latest`;
+
+type UpdateInfo = {
+  latestVersion?: string;
+  releaseNotes?: string;
+  publishedAt?: string;
+  packageName?: string;
+  registryUrl?: string;
+  installCommand?: string;
+};
+
+type NpmLatestMetadata = { name?: string; version?: string; time?: string };
 
 function readVersion(): string {
   try {
@@ -28,22 +41,50 @@ function readVersion(): string {
   return VERSION;
 }
 
-function readUpdateInfo(): { latestVersion?: string; releaseNotes?: string; publishedAt?: string; installUrl?: string } {
+function readUpdateInfo(): UpdateInfo {
   try {
     const local = JSON.parse(fs.readFileSync(path.join(__dirname, 'update-info.json'), 'utf8'));
-    if (local && typeof local === 'object') return local as Record<string, unknown> as { latestVersion?: string };
+    if (local && typeof local === 'object') return local as UpdateInfo;
   } catch { /* ignore */ }
   return {};
 }
 
+function isVersionNewer(candidate: string, current: string): boolean {
+  const parse = (value: string): number[] | null => {
+    const match = value.trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+    return match ? match.slice(1, 4).map(Number) : null;
+  };
+  const next = parse(candidate);
+  const installed = parse(current);
+  if (!next || !installed) return candidate !== current;
+  for (let i = 0; i < 3; i += 1) {
+    if (next[i] !== installed[i]) return next[i] > installed[i];
+  }
+  return false;
+}
+
+async function fetchRegistryLatest(): Promise<NpmLatestMetadata> {
+  const response = await axios.get(NPM_LATEST_URL, {
+    timeout: 4000,
+    responseType: 'json',
+    headers: { Accept: 'application/vnd.npm.install-v1+json' },
+  });
+  const data = response.data as NpmLatestMetadata;
+  if (!data || data.name !== NPM_PACKAGE_NAME || typeof data.version !== 'string' || !data.version) {
+    throw new Error('Unexpected npm registry metadata for AXION AI CLI.');
+  }
+  return data;
+}
+
 function printFullHelp(): void {
   const v = readVersion();
-  console.log(chalk.cyan.bold(`AXION AI Agents CLI v${v}`));
+  console.log(chalk.cyan.bold(`AXION AI CLI v${v}`));
   console.log(chalk.dim('Terminal AI agent with workspace-aware tools, memory, and model management.'));
   console.log('');
   console.log(chalk.bold('Usage:'));
-  console.log('  axion-cli [command] [options]');
-  console.log('  axn-cli   (alias)');
+  console.log('  axion-ai-cli [command] [options]');
+  console.log('  axion-cli    (compatibility alias)');
+  console.log('  axn-cli      (compatibility alias)');
   console.log('');
   console.log(chalk.bold('Terminal commands (run without entering chat):'));
   const termCmds: Array<[string, string]> = [
@@ -52,7 +93,7 @@ function printFullHelp(): void {
     ['--version, -v', 'Print the installed version'],
     ['--feedback', 'Show feedback/support contact info, then enter chat'],
     ['update --info', 'Show latest version, release notes, and update instructions (does NOT update)'],
-    ['update', 'Fast update: download and run install.sh via curl | bash'],
+    ['update', 'Install the latest published package from npmjs using npm'],
   ];
   for (const [cmd, desc] of termCmds) console.log(`  ${chalk.cyan(cmd.padEnd(16))} ${desc}`);
   console.log('');
@@ -80,73 +121,77 @@ function printFullHelp(): void {
   ];
   for (const [cmd, desc] of inApp) console.log(`  ${chalk.cyan(cmd.padEnd(16))} ${desc}`);
   console.log('');
-  console.log(chalk.dim(`User data: ~/.axn-cli  |  Application: ~/.axion/app  |  License: GPL-3.0`));
+  console.log(chalk.dim(`User data: ~/.axn-cli  |  Package: ${NPM_PACKAGE_NAME}  |  License: GPL-3.0`));
 }
 
 async function printUpdateInfo(current: string): Promise<void> {
-  let info = readUpdateInfo();
+  const info = readUpdateInfo();
+  let latest = info.latestVersion || current;
+  let registryAvailable = false;
   try {
-    const res = await axios.get(REMOTE_UPDATE_INFO, { timeout: 5000, responseType: 'json' });
-    if (res.data && typeof res.data === 'object' && res.data.latestVersion) {
-      info = res.data as Record<string, unknown> as typeof info;
-    }
+    const metadata = await fetchRegistryLatest();
+    latest = metadata.version as string;
+    registryAvailable = true;
   } catch {
-    console.log(chalk.dim('(Remote update check failed; showing bundled local update-info.json.)'));
+    console.log(chalk.dim('(npmjs registry check failed; showing bundled version information.)'));
   }
-  const latest = info.latestVersion || current;
-  console.log(chalk.bold('AXION CLI — Update Information'));
+  const updateAvailable = isVersionNewer(latest, current);
+  console.log(chalk.bold('AXION AI CLI — Update Information'));
+  console.log(`  Package:           ${NPM_PACKAGE_NAME}`);
   console.log(`  Installed version: ${current}`);
-  console.log(`  Latest available:  ${latest}${latest !== current ? chalk.green(' (update available)') : chalk.dim(' (up to date)')}`);
-  if (info.publishedAt) console.log(`  Published:         ${info.publishedAt}`);
-  if (info.releaseNotes) {
+  console.log(`  Latest available:  ${latest}${updateAvailable ? chalk.green(' (update available)') : chalk.dim(' (up to date / cached)')}`);
+  console.log(`  Registry:          ${registryAvailable ? NPM_REGISTRY_URL : 'npmjs (temporarily unreachable)'}`);
+  if (info.publishedAt && latest === info.latestVersion) console.log(`  Published:         ${info.publishedAt}`);
+  const releaseNotes = latest === info.latestVersion ? info.releaseNotes : undefined;
+  if (releaseNotes) {
     console.log(chalk.bold('  Release notes:'));
-    console.log(`    ${info.releaseNotes}`);
+    console.log(`    ${releaseNotes}`);
   }
   console.log('');
-  if (latest !== current) {
-    console.log(chalk.cyan('  To update, run:  axion-cli update'));
-    console.log(chalk.dim(`  (curl -fsSL ${UPDATE_URL} | bash)`));
+  if (updateAvailable) {
+    console.log(chalk.cyan(`  To update, run:  ${UPDATE_COMMAND}`));
   } else {
-    console.log(chalk.dim('  You are on the latest version. Run `axion-cli update` to reinstall/repair.'));
+    console.log(chalk.dim(`  You are using the latest known version. Run \`axion-ai-cli update\` to reinstall.`));
   }
 }
 
 function runUpdate(): void {
-  const curlCheck = spawnSync('curl', ['--version'], { stdio: 'ignore' });
-  if (curlCheck.error || curlCheck.status !== 0) {
-    console.error(chalk.red('curl is required to run the fast updater. Install curl, or install manually from: ' + UPDATE_URL));
+  const npmCheck = spawnSync('npm', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  if (npmCheck.error || npmCheck.status !== 0) {
+    console.error(chalk.red('npm is required to update AXION AI CLI. Install Node.js with npm, then retry.'));
     process.exit(1);
   }
-  const cmd = `curl -fsSL ${UPDATE_URL} | bash`;
   if (process.env.AXION_UPDATE_DRY_RUN === '1') {
-    console.log(`[dry-run] would execute: ${cmd}`);
-    console.log(`[dry-run] URL: ${UPDATE_URL}`);
+    console.log(`[dry-run] would execute: ${UPDATE_COMMAND}`);
+    console.log(`[dry-run] registry: ${NPM_REGISTRY_URL}`);
     process.exit(0);
   }
-  console.log(chalk.cyan('Running fast update: ') + cmd);
-  const result = spawnSync('bash', ['-c', cmd], { stdio: 'inherit' });
+  console.log(chalk.cyan('Updating AXION AI CLI from npmjs: ') + UPDATE_COMMAND);
+  const result = spawnSync('npm', ['install', '--global', `${NPM_PACKAGE_NAME}@latest`, '--registry', NPM_REGISTRY_URL], { stdio: 'inherit' });
+  if (result.error) {
+    console.error(chalk.red(`Update failed: ${result.error.message}`));
+    process.exit(1);
+  }
   process.exit(result.status ?? 1);
 }
 
 async function checkForUpdate(current: string): Promise<void> {
-  // Best-effort, non-blocking update check. Never throws or blocks startup.
+  // Best-effort npmjs check. A registry outage must never block CLI startup.
   try {
     let latest: string | undefined;
     let notes: string | undefined;
     try {
-      const res = await axios.get(REMOTE_UPDATE_INFO, { timeout: 4000, responseType: 'json' });
-      const data = res.data as { latestVersion?: string; releaseNotes?: string };
-      latest = data?.latestVersion;
-      notes = data?.releaseNotes;
+      const metadata = await fetchRegistryLatest();
+      latest = metadata.version;
+      const localInfo = readUpdateInfo();
+      notes = metadata.version === localInfo.latestVersion ? localInfo.releaseNotes : undefined;
     } catch {
-      try {
-        const local = JSON.parse(fs.readFileSync(path.join(__dirname, 'update-info.json'), 'utf8')) as { latestVersion?: string; releaseNotes?: string };
-        latest = local?.latestVersion;
-        notes = local?.releaseNotes;
-      } catch { /* no local info either */ }
+      const local = readUpdateInfo();
+      latest = local.latestVersion;
+      notes = local.releaseNotes;
     }
-    if (latest && latest !== current) {
-      console.log(chalk.yellow(`A new version (${latest}) is available. Run: axn-cli update`));
+    if (latest && isVersionNewer(latest, current)) {
+      console.log(chalk.yellow(`A new version (${latest}) is available. Run: axion-ai-cli update`));
       if (notes) console.log(chalk.dim(`  ${notes}`));
     }
   } catch {

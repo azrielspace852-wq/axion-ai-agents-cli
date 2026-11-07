@@ -1,42 +1,49 @@
-# AXION AI Agents CLI — Version 1.1.0 Audit & Validation
+# AXION AI CLI — Final npmjs Release Audit
 
-## Scope
+## Release identity
 
-This release adds the requested command set, terminal UX, access policy, memory editing, system-prompt behavior, automatic task-planning guidance, custom-model management, and per-request tool-call ceilings.
+This is a publication-ready project package; npm publication itself is pending an authorized npm publisher.
 
-## Implemented changes
+- npm package: `@axion-neuralis/axion-ai-cli`
+- Public release version: `1.0.0`
+- Author metadata: `axion`
+- Canonical CLI command: `axion-ai-cli`
+- Compatibility aliases: `axion-cli`, `axn-cli`
+- Registry: `https://registry.npmjs.org/`
+- npm publication access: `public` (configured in `publishConfig`)
 
-1. **`/feedback`** prints `axionneuralis@gmail.com`, `azrielspace852@gmail.com`, and the repository Issues URL.
-2. **Terminal chat UX** enters the ANSI alternate full-screen buffer and clears it on startup, restores the terminal on exit, shows an animated thinking spinner, and draws a rounded input frame at the bottom terminal rows. Tool names/arguments are shown before execution; likely credential-bearing fields and command tokens are redacted in the display.
-3. **`/acces` / `/access`** selects workspace-policy or global scope. Shell working directories are checked against the workspace's real path in workspace mode, including symlink resolution.
-4. **Arrow navigation** uses ArrowUp/ArrowDown and Enter in TTY selection menus. Non-TTY environments retain numeric selection fallback.
-5. **First-run help** is shown once for a newly created configuration and then persisted as completed.
-6. **Shell permission** defaults to enabled for fresh configurations. Existing configurations with an explicit `shellExec: false` retain that opt-out.
-7. **Memory** can be added, edited, renamed, deleted by entry/topic, or cleared. Edited content and topic names persist atomically through the memory store.
-8. **System prompt** is now stored as `systemPrompt`; legacy `instructions` configuration is migrated on load and `/instructions` remains a compatibility command alias. The base prompt adds a workspace inventory, evidence and anti-hallucination rules, action verification, execution transparency, and complex-task checklist guidance.
-9. **Complex task planning** is explicitly instructed in the system prompt: create a Markdown checklist for long or multi-step requests and maintain completion state as the work progresses.
-10. **Custom models** support edit/delete operations for custom entries only, including display name, provider model basename/ID, provider, and optional model-specific OpenAI-compatible base URL. Built-in models are never offered for deletion.
-11. **Tool call limit** is persisted as `maxToolCallsPerRequest`, defaults to 30, is configurable through `/tool-limit`, is clamped to 1–100, and is enforced across all tool calls in one user request.
+## Publication and update flow
 
-## Local validation
+- Package installation resolves through npmjs using `npm install -g @axion-neuralis/axion-ai-cli`.
+- Project-local installation is documented as `npm install @axion-neuralis/axion-ai-cli` and `npx axion-ai-cli`.
+- The runtime update checker requests `https://registry.npmjs.org/@axion-neuralis%2Faxion-ai-cli/latest` and validates the returned package name before accepting its version.
+- The `update` command installs `@latest` through npmjs; it no longer downloads or executes a remote shell script.
+- `install.sh` is an optional npmjs bootstrapper and does not clone GitHub or rebuild source.
+- Lockfile tarball URLs use `https://registry.npmjs.org/`.
 
-- TypeScript compile: **passed** with the available global TypeScript compiler and temporary offline declaration shims.
-- Core regression suite: **21 passed, 0 failed**.
-- `bash -n install.sh`: **passed**.
-- Package metadata and CLI version consistency: **passed** (`1.1.0`).
-- Installer staging/rollback regression: **passed** within the existing installer test harness.
-- Pseudo-TTY integration checks: **passed** for first-launch help, ArrowUp/ArrowDown/Enter menu selection, feedback output, rounded bottom input frame, alternate-screen entry/restore, and animated spinner frames.
-- Tool-call ceiling integration: **passed**; with a test limit of 2, exactly two shell commands ran and the third received a tool-limit error result.
-- Workspace working-directory guard: **passed**, including a symlink that resolves outside the workspace.
+## Version synchronization
 
-## Verification limits
+The current release version is `1.0.0` in `package.json`, `package-lock.json`, `version.json`, `version-info.json`, `update-info.json`, `src/banner.ts`, and generated `dist/` files.
 
-- `npm install --no-audit --no-fund` timed out because the package registry was unreachable from this environment. The environment did not contain the declared project dependencies. To perform local validation, temporary `axios`, `chalk`, and `cheerio` shims plus an available Node type package were used only in the working directory. These test shims are excluded from the release ZIP. As a result, this is not a clean install using the exact pinned dependency versions (`axios@1.7.2`, `chalk@4.1.2`, `cheerio@1.0.0`, TypeScript 5.4.5, and `@types/node@20.14.0`).
-- No live Google AI Studio or OpenAI-compatible API request was possible. Provider behavior remains dependent on valid credentials, model access, and service availability.
-- Pseudo-TTY checks ran on a Linux terminal emulation, not a physical Android/Termux device. The input frame anchors to the terminal's last rows on every prompt, which is the correct terminal-level placement above Termux's available keyboard area when the terminal viewport reflects the keyboard. Exact device-specific keyboard/window behavior still requires a Termux device test.
-- **Workspace scope is not an OS sandbox.** It restricts the shell tool's requested working directory and guides the agent not to operate outside the workspace, but arbitrary shell commands still execute with the current OS user's permissions and can address external paths. Enforcing a hard filesystem boundary requires an OS/container sandbox (for example, a supported sandbox runtime), which is not bundled or assumed here.
-- Shell execution is enabled by default for fresh configurations as requested. It executes with the current user's OS privileges; users who do not accept that risk should disable `shellExec` using `/permissions`.
+## Validation results
 
-## Release contents
+- [x] JSON metadata parses and `package.json` / `package-lock.json` identity and version match.
+- [x] Active project metadata/runtime/docs no longer use the former internal release value; the release target is `1.0.0`.
+- [x] Lockfile package tarball URLs use `https://registry.npmjs.org/` (GitHub links in the lockfile are funding metadata only).
+- [x] `bash -n install.sh` succeeds.
+- [x] TypeScript build succeeds and regenerates the `dist/` entry point and matching version manifests.
+- [x] Core regression suite: **32 passed, 0 failed**.
+- [x] CLI smoke tests: `--version`, `--help`, `update --info` fallback path, and `update` dry-run.
+- [x] Installer integration test confirms delegation to the official npm registry.
+- [x] `npm pack --dry-run --json --ignore-scripts` reports `@axion-neuralis/axion-ai-cli@1.0.0`, 32 package entries, and the expected runtime/docs files.
 
-The archive contains source, tests, documentation, installer, GPL license, and compiled `dist` output. It excludes `node_modules`, temporary test shims, and npm cache data.
+## Validation limitations
+
+- A clean `npm ci --no-audit --no-fund --registry=https://registry.npmjs.org/` attempt timed out in this environment. Therefore the pinned dependency set was not installed from npmjs here.
+- To complete local compilation and tests despite that registry timeout, validation-only type declarations and runtime shims were created in the temporary workspace for Axios, Chalk, Cheerio, and Node types. The shims were removed from the release archive; tests that exercise provider networking use mocked Axios responses. The test result is therefore a local regression result, not evidence of a clean install with every exact pinned dependency version.
+- The registry lookup could not be confirmed live from this environment. `update --info` used its bundled metadata fallback during the smoke test. The code is configured to query npmjs at runtime when network access is available.
+- No real model-provider request was made. Provider behavior still requires valid API credentials and network access.
+
+## Publication limitation
+
+Preparing this project does not publish it. Actual `npm publish --access public` must be run by an npm account authorized to publish under the `@axion-neuralis` scope, with any required npm authentication/2FA. The archive must not be described as published until npmjs confirms the release.

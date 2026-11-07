@@ -483,7 +483,7 @@ export async function handleLanguage(ctx: CommandContext): Promise<HandlerResult
 }
 
 export async function handleFeedback(ctx: CommandContext): Promise<HandlerResult | void> {
-  ctx.repl.print(chalk.bold('AXION AI Agents CLI — Feedback & Support'));
+  ctx.repl.print(chalk.bold('AXION AI CLI — Feedback & Support'));
   ctx.repl.print('Email: axionneuralis@gmail.com');
   ctx.repl.print('Email: azrielspace852@gmail.com');
   ctx.repl.print('GitHub Issues: https://github.com/azrielspace852-wq/axion-ai-agents-cli/issues');
@@ -521,7 +521,7 @@ export async function handleHelp(ctx: CommandContext): Promise<HandlerResult | v
 
 export async function handlePrivacyPolicy(ctx: CommandContext): Promise<HandlerResult | void> {
   const lines: string[] = [
-    chalk.bold('AXION AI Agents CLI — Security & Privacy (honest summary)'),
+    chalk.bold('AXION AI CLI — Security & Privacy (honest summary)'),
     '',
     chalk.bold('1. Where your data is stored'),
     `   • All local data lives in ~/.axn-cli (override with $AXION_DATA_DIR):`,
@@ -544,13 +544,13 @@ export async function handlePrivacyPolicy(ctx: CommandContext): Promise<HandlerR
     '   • No telemetry, analytics, or crash reporting is sent to any AXION server.',
     '   • No third-party tracking. The only network calls are: the LLM provider API,',
     '     web search / page fetch triggered by tools (to public hosts only), and the',
-    '     optional update check / update command to GitHub raw content.',
+    '     optional version check and package installation from the official npm registry.',
     '',
     chalk.bold('4. Risks you should understand'),
     '   • The shell tool executes commands with YOUR user privileges. Workspace',
     '     "access scope" is an agent policy, not an OS sandbox.',
-    '   • `axn-cli update` downloads and runs a remote shell script (curl | bash)',
-    '     from the project\'s GitHub repository. Inspect install.sh before trusting it.',
+    '   • `axion-ai-cli update` asks npm to install the latest published package',
+    '     from https://registry.npmjs.org/. Review package provenance and metadata.',
     '   • Conversation history may contain sensitive text; it is stored locally in',
     '     plain JSON. Delete it manually any time via /conversation or rm -rf ~/.axn-cli.',
     '',

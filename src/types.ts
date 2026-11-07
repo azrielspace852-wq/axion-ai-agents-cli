@@ -1,4 +1,4 @@
-// Shared types & constants for AXION AI Agents CLI
+// Shared types & constants for AXION AI CLI
 
 export type Role = 'user' | 'assistant' | 'system' | 'tool';
 
@@ -172,7 +172,7 @@ export const THINKING_BUDGET: Record<Exclude<ThinkingLevel, 'off'>, number> = {
 };
 
 export const USER_AGENT =
-  'Mozilla/5.0 (compatible; AxionCLI/1.5; +https://github.com/azrielspace852-wq/axion-ai-agents-cli)';
+  'Mozilla/5.0 (compatible; AxionAICLI/1.0.0; +https://github.com/azrielspace852-wq/axion-ai-agents-cli)';
 
 export const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';

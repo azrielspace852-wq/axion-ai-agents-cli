@@ -1,6 +1,7 @@
 {
-  "latestVersion": "1.5.0",
-  "releaseNotes": "v1.5.0: dynamic multi-phase AI status indicator (sending/thinking/receiving/tool/processing) replacing the static spinner; streaming SSE with idle watchdog in both providers (no more flat 120s timeout — active streaming never times out); active-option indicator (● current) in all selectors; Add Custom Provider directly in /provider menu with interactive flow (name/base URL/secret API key/optional default model), edit/delete supported, all OpenAI-compatible; long-term memory always stored summarized (never raw) with auto-summary every 3 user messages and 'updating memory' status; conversation rename via /rename and /conversation menu; all config changes persist globally via ConfigManager; /clear fully resets chat context (not only screen); notices print above the input line with status line redrawn.",
-  "publishedAt": "2026-11-07",
-  "installUrl": "https://raw.githubusercontent.com/azrielspace852-wq/axion-ai-agents-cli/main/install.sh"
+  "latestVersion": "1.0.0",
+  "releaseNotes": "Final npmjs release package prepared at version 1.0.0. Includes interactive AI-agent CLI, Google AI Studio and OpenAI-compatible providers, tool calling, web search and page extraction, local conversation history and summarized long-term memory, configurable permissions, custom providers, and npm registry-based update checks.",
+  "packageName": "@axion-neuralis/axion-ai-cli",
+  "registryUrl": "https://registry.npmjs.org/",
+  "installCommand": "npm install -g @axion-neuralis/axion-ai-cli"
 }

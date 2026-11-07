@@ -1,10 +1,11 @@
 {
-  "name": "axion-ai-agents-cli",
-  "version": "1.5.0",
-  "description": "AXION AI Agents CLI - terminal AI agent with workspace-aware tools, memory, and model management",
+  "name": "@axion-neuralis/axion-ai-cli",
+  "version": "1.0.0",
+  "description": "AXION AI CLI — an interactive terminal AI agent with tools, provider integrations, conversation history, and local memory",
   "license": "GPL-3.0-or-later",
-  "author": "AXION Neuralis",
+  "author": "axion",
   "bin": {
+    "axion-ai-cli": "dist/index.js",
     "axion-cli": "dist/index.js",
     "axn-cli": "dist/index.js"
   },
@@ -16,7 +17,8 @@
     "build": "tsc -p tsconfig.json && node -e \"const fs=require('fs');fs.copyFileSync('version.json','dist/version.json');fs.copyFileSync('update-info.json','dist/update-info.json');fs.copyFileSync('version-info.json','dist/version-info.json');try{fs.chmodSync('dist/index.js',0o755)}catch(e){}\"",
     "start": "node dist/index.js",
     "test": "npm run build && node --test tests/*.test.cjs",
-    "check": "npm test"
+    "check": "npm test",
+    "prepublishOnly": "npm test"
   },
   "keywords": [
     "ai",
@@ -36,5 +38,23 @@
   "devDependencies": {
     "@types/node": "20.14.0",
     "typescript": "5.4.5"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/azrielspace852-wq/axion-ai-agents-cli.git"
+  },
+  "homepage": "https://github.com/azrielspace852-wq/axion-ai-agents-cli#readme",
+  "bugs": {
+    "url": "https://github.com/azrielspace852-wq/axion-ai-agents-cli/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
 }

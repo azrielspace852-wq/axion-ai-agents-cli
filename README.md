@@ -1,26 +1,18 @@
+[![npm version](https://img.shields.io/npm/v/%40axion-neuralis%2Faxion-ai-cli)](https://www.npmjs.com/package/@axion-neuralis/axion-ai-cli)
 [![License: GPL v3 or later](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18.17-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Platform](https://img.shields.io/badge/Platform-Termux%20%7C%20Linux%20%7C%20macOS-informational)](#requirements)
 
-# AXION AI Agents CLI
+# AXION AI CLI
 
-A terminal-based AI agent by **AXION Neuralis**. AXION provides an interactive command-line interface, model-provider integration, tool calling, web search, page extraction, conversation history, and local long-term memory.
+
+A terminal-based AI agent published by **AXION Neuralis**. AXION provides an interactive command-line interface, model-provider integration, tool calling, web search, page extraction, conversation history, and local long-term memory.
+
+**npm package:** [`@axion-neuralis/axion-ai-cli`](https://www.npmjs.com/package/@axion-neuralis/axion-ai-cli)  
+**Release target:** `1.0.0` — Final npmjs Release
 
 > AXION is an API-backed CLI application. You must provide credentials for the selected model provider before chatting.
 
-## Release notes (1.5.0)
-Version 1.5.0 (2026-11-07) adds: (1) **Chat UI polish** — tool/notice logs print above the input line and the status line is redrawn; `/clear` fully resets the current chat context (history + buffered messages), not only the screen. (2) **Active-option indicator** in every selector (model, provider, thinking level, access scope, language, tool limit, conversations, dangerous-action policy, custom model provider) — the current choice is marked `● (current)` separately from the cursor highlight. (3) **Custom Provider** can be added directly from the `/provider` menu (interactive: name → auto-derived unique slug → base URL validation → secret API key prompt → optional default model); edit/delete supported; all custom providers are OpenAI-compatible and route through `OpenAICompatProvider`. (4) **Dynamic multi-phase AI status indicator** replaces the static "thinking…" spinner: `Sending request…` → `Thinking…` → `Receiving response…` (on first streamed chunk) → `Running tool: <name>…` → `Processing tool result…`, updated in-place and cleared on completion/error. (5) **Streaming + idle watchdog** in both providers: flat `timeout: 120000` removed; OpenAI-compatible uses SSE `stream:true`, Google AI uses `streamGenerateContent?alt=sse`; an idle watchdog (default 60s, `AXION_IDLE_TIMEOUT`) aborts only when no chunk/heartbeat arrives — active streaming never times out. AbortSignal for ESC/cancel preserved. Non-SSE fallback included. (6) **Summarized memory**: long-term memory is always stored as a summary (never raw); auto-summary runs every 3 user messages with an `Updating memory…` status. (7) **Conversation rename**: `/rename [name]` and a `Rename conversation` action in `/conversation`; `ConversationStore.rename()` added. (8) **Global config persistence**: every config change (model, provider, thinking level, limits, API keys, custom instructions, permissions, policy, verbose, access scope, custom models/providers) is persisted via `ConfigManager.save()`; `CommandContext` now exposes `configManager`. New sessions still start a fresh conversation. (9) **Version bump** to 1.5.0 across `package.json`, `version.json`, `version-info.json`, `update-info.json`, `banner.ts`, `USER_AGENT`, and bundled `dist/` copies.
-
-### Release notes (1.4.0)
-Version 1.4.0 adds persistent **custom providers** (manage via `/provider`, credentials auto-load on switch), a **step-by-step UI** that classifies tool calls into human-readable steps with a `/verbose` toggle, a **dangerous-action permission policy** (Always Ask / Allow / Deny) with explicit Yes/No confirmation, **filesystem tools** (`list_dir`, `read_file`, `write_file` atomic, `delete_file`) gated by permissions, a folder-tree summary in the system prompt, **ESC-to-cancel** of in-flight requests, a **locked base system prompt** vs user-editable **custom instructions** (`/instructions`), and `install.sh` **self-delete** after a successful install. Version bumped to 1.4.0; `version-info.json` added alongside `update-info.json`.
-
-## Release notes (1.3.0)
-
-Version 1.3.0 verifies the terminal UI rendering path end-to-end under a pseudo-TTY with a mocked provider (single persistent input prompt, AI replies visible, menu cleanup), adds direct terminal commands (`--help` full, `--feedback`, `update --info`), and makes `install.sh` explicitly preserve user data in `~/.axn-cli` while uninstalling only the old application directory.
-
-Version 1.2.0 fixed the Gemma 4 thinking-off loop, removed the full-screen alt-screen mode and bottom-anchored input frame (replies now scroll normally above a persistent prompt), added inline `/` command autocomplete, in-memory conversation buffering with flush at session boundaries, `/privacy-policy`, `/max-token`, `/max-tool-call` alias, provider-filtered `/models`, the `axn-cli` binary alias, and `version.json`/`update-info.json` version checking.
-
-Version 1.1.0 adds the requested CLI UX and agent controls: feedback contacts, workspace/global access policy, arrow-key menus, first-run help, animated thinking indicator, editable memory, custom-model management, an explicit system prompt, task-planning guidance, and a configurable per-request tool-call limit (default 30). It retains the 1.0.2 build fix based on Node.js `crypto.randomUUID()`.
 
 ## Features
 
@@ -36,7 +28,7 @@ Version 1.1.0 adds the requested CLI UX and agent controls: feedback contacts, w
 - **Conversation storage** with open, delete, and JSON backup operations (buffered in memory per session, flushed at session boundaries).
 - **Local long-term memory** that can be added, summarized, listed, edited, renamed, and removed.
 - **Permission and access-scope controls**. Shell execution is enabled by default for fresh configurations; the agent can be set to workspace-policy or global scope.
-- Designed for **Termux and Unix-like environments** with Node.js 18.17 or newer. `axion-cli` and `axn-cli` are both available as command aliases.
+- Designed for **Termux and Unix-like environments** with Node.js 18.17 or newer. `axion-ai-cli` is the canonical command; `axion-cli` and `axn-cli` remain compatibility aliases.
 
 ## Requirements
 
@@ -54,29 +46,53 @@ pkg install nodejs
 
 ## Installation
 
-### One-line installer
+### Recommended: global installation
+
+Install the published package directly from npmjs:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/azrielspace852-wq/axion-ai-agents-cli/main/install.sh | bash
+npm install -g @axion-neuralis/axion-ai-cli
 ```
 
-The installer downloads the `main` branch, installs dependencies in a staging directory, builds the TypeScript application, runs the regression suite and a CLI version smoke test, and only then activates the new application directory. When replacing an existing installation, the previous application directory is retained as a backup instead of being deleted automatically.
-
-By default, the application is installed at `~/.axion/app`. The command is linked into a writable command directory (Termux `$PREFIX/bin` when available, otherwise `~/.local/bin` or `/usr/local/bin`). Add that directory to your `PATH` if the installer reports that it is missing.
-
-To choose a different application directory:
+Then start the CLI:
 
 ```sh
-AXION_INSTALL_DIR="$HOME/apps/axion-ai-agents-cli" \
-  bash <(curl -fsSL https://raw.githubusercontent.com/azrielspace852-wq/axion-ai-agents-cli/main/install.sh)
+axion-ai-cli
 ```
 
-### Manual installation
+The compatibility commands `axion-cli` and `axn-cli` are also provided. If your npm global binary directory is not in `PATH`, check `npm prefix -g` and add its `bin` directory to your shell profile.
+
+### Install as a project dependency
+
+```sh
+npm install @axion-neuralis/axion-ai-cli
+npx axion-ai-cli
+```
+
+### Update
+
+```sh
+axion-ai-cli update
+```
+
+The updater installs the latest published package through `https://registry.npmjs.org/`. To inspect the installed and latest versions without changing the installation, run `axion-ai-cli update --info`. For a project-local install, update the dependency with `npm install @axion-neuralis/axion-ai-cli@latest`.
+
+### Optional installer script
+
+The repository's `install.sh` is a small npmjs bootstrapper. When you already have a local copy of this repository, run:
+
+```sh
+bash install.sh
+```
+
+It does not clone GitHub source or build the project; it delegates installation to npmjs.
+
+### Install from source (contributors)
 
 ```sh
 git clone https://github.com/azrielspace852-wq/axion-ai-agents-cli.git
 cd axion-ai-agents-cli
-npm install
+npm ci
 npm run build
 node dist/index.js
 ```
@@ -86,7 +102,7 @@ node dist/index.js
 Start the application:
 
 ```sh
-axion-cli
+axion-ai-cli
 ```
 
 Set an API key from the interactive prompt:
@@ -101,18 +117,18 @@ To select another provider, use `/provider`. For an OpenAI-compatible provider, 
 
 ## Commands
 
-AXION runs as a normal scrolling terminal chat: AI replies print above a single persistent input prompt. Typing `/` at the start of a line opens an inline command-suggestion popup (ArrowUp/ArrowDown to navigate, Enter to fill the highlighted command, Esc to dismiss). Set `AXION_NO_AUTOCOMPLETE=1` to disable the popup (useful for scripting). The old full-screen/alt-screen mode and bottom-anchored input frame were removed in v1.2.0.
+AXION runs as a normal scrolling terminal chat: AI replies print above a single persistent input prompt. Typing `/` at the start of a line opens an inline command-suggestion popup (ArrowUp/ArrowDown to navigate, Enter to fill the highlighted command, Esc to dismiss). Set `AXION_NO_AUTOCOMPLETE=1` to disable the popup (useful for scripting). The old full-screen/alt-screen mode and bottom-anchored input frame are not used.
 
 ### Terminal commands (without entering chat)
 
 | Command | Description |
 |---|---|
-| `axion-cli` (no args) | Enter interactive chat mode. `axn-cli` is an alias. |
-| `axion-cli --help` / `-h` | Show full help: terminal + in-chat commands. |
-| `axion-cli --version` / `-v` | Print the installed version (from `dist/version.json`). |
-| `axion-cli --feedback` | Show support contacts, then enter chat. |
-| `axion-cli update --info` | Show latest available version, release notes, and update instructions (does NOT update). |
-| `axion-cli update` | Fast update: `curl -fsSL <install.sh> \| bash`. `AXION_UPDATE_DRY_RUN=1` prints the command without running it. |
+| `axion-ai-cli` (no args) | Enter interactive chat mode. `axion-cli` and `axn-cli` are compatibility aliases. |
+| `axion-ai-cli --help` / `-h` | Show full help: terminal + in-chat commands. |
+| `axion-ai-cli --version` / `-v` | Print the installed version (from `dist/version.json`). |
+| `axion-ai-cli --feedback` | Show support contacts, then enter chat. |
+| `axion-ai-cli update --info` | Read the latest version from npmjs and show update instructions without installing. |
+| `axion-ai-cli update` | Install the latest published package using npm and the official npmjs registry. `AXION_UPDATE_DRY_RUN=1` prints the command without running it. |
 
 ### In-chat commands (type inside the REPL)
 
@@ -190,8 +206,6 @@ Press **Escape** while the agent is thinking or executing tools to request cance
 ## System prompt vs custom instructions
 The **base system prompt** (anti-hallucination, workspace awareness, execution transparency, no secrets in output, tool-call limits) is **locked** — it cannot be edited by the user. Your own additional instructions live in **custom instructions**, edited with `/instructions` (legacy `systemPrompt`/`instructions` fields in old configs are migrated automatically on load). The base prompt explicitly states: *If custom instructions conflict with these core rules, these core rules take precedence.* Use `/system` or `/system-prompt` to view the locked base prompt and your current custom instructions (read-only).
 
-## Installer self-delete
-After a fully successful installation, if `install.sh` was run as a regular file (e.g. you downloaded it and ran `bash install.sh`), it removes itself. If it was run via `curl | bash` (stdin), there is no local file to delete and a clear message is printed. If installation fails at any step, the script exits before reaching the self-delete, so the installer is preserved for diagnosis.
 
 ## Local data and configuration
 
@@ -211,7 +225,7 @@ The configuration file contains provider credentials (including custom providers
 ## Development and validation
 
 ```sh
-npm install
+npm ci
 npm run build
 npm test
 ```
@@ -220,7 +234,7 @@ npm test
 
 ## Troubleshooting
 
-**`axion-cli: command not found`** — Add the installer's reported command directory to your `PATH`, then restart your shell or source the relevant profile.
+**`axion-ai-cli: command not found`** — Add the npm global binary directory (under `npm prefix -g`) to your `PATH`, then restart your shell or source the relevant profile.
 
 **`No API key configured`** — Run `/api-key`, or switch provider with `/provider` and configure the matching key.
 
@@ -228,11 +242,11 @@ npm test
 
 **Search returns no results** — Search engines may rate-limit or change their HTML layout. Retry later; this feature does not use an official Google Search API.
 
-**Build fails during installation** — Check that Node.js is 18.17 or newer, npm is available, and the package registry can be reached. The installer builds in a staging folder so an existing installation is not replaced when dependency installation or compilation fails.
+**Installation fails** — Check that Node.js is 18.17 or newer, npm is available, the `@axion-neuralis` npm scope is accessible to your account, and `https://registry.npmjs.org/` can be reached. For a permission error during global installation, configure a user-owned npm prefix or use a local project installation.
 
 ## License
 
-AXION AI Agents CLI is licensed under the **GNU General Public License v3.0 or later**. See [LICENSE](LICENSE) for the complete license text.
+AXION AI CLI is licensed under the **GNU General Public License v3.0 or later**. See [LICENSE](LICENSE) for the complete license text.
 
 ---
 
